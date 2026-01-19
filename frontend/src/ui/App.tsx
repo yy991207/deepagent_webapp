@@ -955,7 +955,7 @@ function App() {
           ) : (
             <div class="sidebar-card">
               <div class="sidebar-header">
-                <h2>{leftPanelMode === "sources" ? "来源" : "聊天历史"}</h2>
+                <h2>{leftPanelMode === "sources" ? "数据来源" : "聊天历史"}</h2>
                 <div class="sidebar-header-actions">
                   <div class="icon-btn"><Icons.Settings /></div>
                   <button
@@ -976,7 +976,7 @@ function App() {
                   style={{ flex: 1, justifyContent: "center", opacity: leftPanelMode === "sources" ? 1 : 0.7 }}
                   onClick={() => setLeftPanelMode("sources")}
                 >
-                  来源
+                  数据来源
                 </button>
                 <button
                   type="button"
@@ -1007,7 +1007,11 @@ function App() {
                   <Icons.Plus />
                   新增会话
                 </button>
-                <div class="source-list" style={{ paddingTop: 0 }}>
+                <div 
+                  class="source-list" 
+                  style={{ paddingTop: 0 }}
+                  onClick={() => setDeleteSessionId(null)}
+                >
                   <div class="file-list">
                     {chatSessions.length ? (
                       chatSessions.map((s) => {
@@ -1021,7 +1025,10 @@ function App() {
                           <div
                             key={s.session_id}
                             class={`file-item ${active ? "selected" : ""}`}
-                            onClick={() => void switchSession(s.session_id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void switchSession(s.session_id);
+                            }}
                             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
                           >
                             <div style={{ minWidth: 0 }}>
@@ -1032,41 +1039,33 @@ function App() {
                                 {timeText}{s.message_count ? ` · ${s.message_count} 条` : ""}
                               </div>
                             </div>
-                            {isDeleting ? (
-                              <button
-                                type="button"
-                                style={{ 
-                                  padding: "4px 12px",
-                                  background: "#dc3545",
-                                  color: "white",
-                                  border: "none",
-                                  borderRadius: 4,
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                  whiteSpace: "nowrap"
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                            <button
+                              type="button"
+                              style={{ 
+                                background: "none",
+                                border: "none",
+                                color: isDeleting ? "#1f2937" : "#9ca3af",
+                                fontSize: 18,
+                                cursor: "pointer",
+                                padding: 4,
+                                lineHeight: 1,
+                                transition: "color 0.2s",
+                                animation: isDeleting ? "shake 0.5s ease-in-out infinite" : "none"
+                              }}
+                              onMouseEnter={(e) => !isDeleting && (e.currentTarget.style.color = "#ef4444")}
+                              onMouseLeave={(e) => !isDeleting && (e.currentTarget.style.color = "#9ca3af")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isDeleting) {
                                   confirmDeleteSession();
-                                }}
-                              >
-                                确认删除
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                class="ref-modal-close"
-                                style={{ width: 28, height: 28, lineHeight: "28px" }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                                } else {
                                   requestDeleteSession(s.session_id);
-                                }}
-                                aria-label="删除会话"
-                              >
-                                ×
-                              </button>
-                            )}
+                                }
+                              }}
+                              aria-label="删除会话"
+                            >
+                              ×
+                            </button>
                           </div>
                         );
                       })
