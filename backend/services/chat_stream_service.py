@@ -16,6 +16,8 @@ from deepagents_cli.agent import create_cli_agent
 from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
+from backend.services.filesystem_write_service import FilesystemWriteService
+from backend.services.session_cancel_service import get_session_cancel_service
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,25 @@ class ChatStreamService:
 
         extra_system_prompt = ""
         attachments_meta: list[dict[str, Any]] = []
+
+        extra_system_prompt = (
+            extra_system_prompt + "\n\n" + 
+            "<file_write_rules>\n"
+            "**重要：文件写入后的回复规则**\n\n"
+            "当你使用 write_file 工具保存文件后：\n"
+            "1. **绝对禁止**在回复中提及任何文件路径（包括相对路径和绝对路径）\n"
+            "2. **绝对禁止**使用引号或代码块包裹路径\n"
+            "3. **只能**说：'文档已保存' 或 '内容已整理成文档'\n"
+            "4. 用户会在聊天界面看到文档卡片，可以点击查看\n\n"
+            "正确示例：\n"
+            "- ✅ '我已将内容整理成文档，你可以点击下方的文档卡片查看。'\n"
+            "- ✅ '文档已保存，请点击查看。'\n\n"
+            "错误示例：\n"
+            "- ❌ '已保存到 /Users/yang/...'\n"
+            "- ❌ '文件路径为：...'\n"
+            "- ❌ '保存在 `agent_framework_summary.md`'\n"
+            "</file_write_rules>"
+        ).strip()
 
         if isinstance(file_refs, list):
             for ref in file_refs:
@@ -218,10 +239,13 @@ class ChatStreamService:
             if settings.has_tavily:
                 tools.append(web_search)
 
+            fs_write_service = FilesystemWriteService(session_id=thread_id)
+            custom_write_file = fs_write_service.create_write_file_tool()
+
             agent, _backend = create_cli_agent(
                 model=model,
                 assistant_id=assistant_id,
-                tools=[*tools, rag_query],
+                tools=[*tools, rag_query, custom_write_file],
                 workspace_root=self._base_dir,
                 rag_source_files=[str(x) for x in file_refs] if isinstance(file_refs, list) else None,
                 extra_system_prompt=extra_system_prompt,
@@ -252,6 +276,8 @@ class ChatStreamService:
             pending_text_deltas: list[str] = []
             saw_tool_call = False
 
+            cancel_service = get_session_cancel_service()
+            
             try:
                 async for chunk in agent.astream(
                     stream_input,
@@ -259,6 +285,12 @@ class ChatStreamService:
                     subgraphs=True,
                     config={"configurable": {"thread_id": thread_id}},
                 ):
+                    # 检测会话是否已被取消，如果是则中断流式生成
+                    if cancel_service.is_cancelled(thread_id):
+                        logger.info(f"会话已取消，中断流式生成: session_id={thread_id}")
+                        yield {"type": "session.status", "status": "cancelled"}
+                        break
+                    
                     if not isinstance(chunk, tuple) or len(chunk) != 3:
                         continue
                     _namespace, mode, data = chunk

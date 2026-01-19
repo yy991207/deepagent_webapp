@@ -15,6 +15,7 @@ import type {
   AgentLog,
   SocketPayload,
   ChatSession,
+  FilesystemWrite,
 } from "./types";
 
 import {
@@ -206,12 +207,20 @@ function App() {
   const pendingAssistantIdRef = useRef<string | null>(null);
   const pendingRefsRef = useRef<RagReference[] | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentSessionIdRef = useRef<string>("");
 
-  const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId());
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const sid = getOrCreateSessionId();
+    currentSessionIdRef.current = sid;
+    return sid;
+  });
 
   const [leftPanelMode, setLeftPanelMode] = useState<"sources" | "sessions">("sources");
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
+  const [filesystemWrites, setFilesystemWrites] = useState<FilesystemWrite[]>([]);
+  const [writeDetailOpen, setWriteDetailOpen] = useState(false);
+  const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; title: string} | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
@@ -275,7 +284,15 @@ function App() {
   const switchSession = async (sid: string) => {
     const next = String(sid || "").trim();
     if (!next) return;
+    // 切换会话时终止当前 SSE 请求
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    currentSessionIdRef.current = next;
     setSessionId(next);
+    setStatus("就绪");
+    assistantBufferRef.current = { id: "", text: "" };
+    pendingAssistantIdRef.current = null;
+    pendingRefsRef.current = null;
     try {
       localStorage.setItem("deepagents_session_id", next);
     } catch {
@@ -291,6 +308,16 @@ function App() {
   const confirmDeleteSession = async () => {
     const sid = deleteSessionId;
     if (!sid) return;
+
+    // 删除当前会话时终止正在进行的 SSE 请求
+    if (sid === sessionId) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      setStatus("就绪");
+      assistantBufferRef.current = { id: "", text: "" };
+      pendingAssistantIdRef.current = null;
+      pendingRefsRef.current = null;
+    }
 
     const resp = await fetch(`/api/chat/session/${encodeURIComponent(sid)}?assistant_id=agent`, {
       method: "DELETE",
@@ -422,6 +449,7 @@ function App() {
       return;
     }
     const data = (await resp.json()) as {
+      writes?: FilesystemWrite[];
       messages?: Array<{
         id: string;
         role: string;
@@ -440,6 +468,8 @@ function App() {
       }>;
     };
     const items = Array.isArray(data.messages) ? data.messages : [];
+    setFilesystemWrites(Array.isArray(data.writes) ? data.writes : []);
+
     const mapped: ChatMessage[] = items
       .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "tool")
       .map((m) => {
@@ -670,6 +700,10 @@ function App() {
 
 
   const handleSocketPayload = (payload: SocketPayload) => {
+    // 过滤非当前会话的 SSE 事件，避免旧会话的数据渲染到新会话
+    if (payload.session_id && payload.session_id !== currentSessionIdRef.current) {
+      return;
+    }
     if (payload.type === "rag.references") {
       pendingRefsRef.current = payload.references || [];
       if (assistantBufferRef.current.id) {
@@ -1242,6 +1276,47 @@ function App() {
                           />
                         </div>
                       </div>
+                      {filesystemWrites.length > 0 && (
+                        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {filesystemWrites.map((w) => (
+                            <div
+                              key={w.write_id}
+                              style={{
+                                background: "#f8f9fa",
+                                border: "1px solid #e9ecef",
+                                borderRadius: 8,
+                                padding: "10px 12px",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                transition: "all 0.2s"
+                              }}
+                              onClick={async () => {
+                                const resp = await fetch(`/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`);
+                                if (resp.ok) {
+                                  const data = await resp.json();
+                                  setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
+                                  setWriteDetailOpen(true);
+                                }
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "#e9ecef")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "#f8f9fa")}
+                            >
+                              <div style={{ fontSize: 20 }}>📄</div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {w.title}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#6c757d" }}>
+                                  {w.type} · {(w.size / 1024).toFixed(1)}KB
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#0d6efd", fontWeight: 500 }}>查看</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div class="message-actions">
                         <button class="action-btn"><Icons.Copy /></button>
                         <button class="action-btn"><Icons.ThumbUp /></button>
@@ -1765,6 +1840,31 @@ function App() {
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {writeDetailOpen && (
+        <div class="ref-modal-backdrop" onClick={() => setWriteDetailOpen(false)}>
+          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="ref-modal-header">
+              <div class="ref-modal-title">
+                {writeDetail?.title || "文档详情"}
+              </div>
+              <button class="ref-modal-close" onClick={() => setWriteDetailOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div class="ref-modal-body">
+              {writeDetail ? (
+                <div>
+                  <div class="ref-section-title">文档内容</div>
+                  <pre class="ref-file" style={{ maxHeight: "calc(100vh - 150px)" }}>{writeDetail.content}</pre>
+                </div>
+              ) : (
+                <div class="ref-muted">加载中...</div>
+              )}
             </div>
           </div>
         </div>

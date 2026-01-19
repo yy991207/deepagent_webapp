@@ -73,6 +73,10 @@ class MongoDbManager:
         client = self._get_client()
         return client[self._db_name][_DEFAULT_CHAT_SESSIONS_COLLECTION]
 
+    def _filesystem_writes_collection(self):
+        client = self._get_client()
+        return client[self._db_name][_DEFAULT_FILESYSTEM_WRITES_COLLECTION]
+
     def store_file(
         self,
         *,
@@ -440,6 +444,73 @@ class MongoDbManager:
             )
         return out
 
+    def create_filesystem_write(
+        self,
+        *,
+        write_id: str,
+        session_id: str,
+        file_path: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        now = get_beijing_time()
+        doc: dict[str, Any] = {
+            "write_id": write_id,
+            "session_id": session_id,
+            "file_path": file_path,
+            "content": content,
+            "metadata": metadata or {},
+            "created_at": now,
+        }
+        result = self._filesystem_writes_collection().insert_one(doc)
+        return str(result.inserted_id)
+
+    def get_filesystem_write(self, *, write_id: str, session_id: str) -> dict[str, Any] | None:
+        doc = self._filesystem_writes_collection().find_one(
+            {"write_id": write_id, "session_id": session_id}
+        )
+        if not doc:
+            return None
+
+        created = doc.get("created_at")
+        created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
+
+        return {
+            "write_id": doc.get("write_id"),
+            "session_id": doc.get("session_id"),
+            "file_path": doc.get("file_path"),
+            "content": doc.get("content"),
+            "metadata": doc.get("metadata") or {},
+            "created_at": created_at,
+        }
+
+    def list_filesystem_writes(self, *, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        cursor = (
+            self._filesystem_writes_collection()
+            .find({"session_id": session_id})
+            .sort("created_at", -1)
+            .limit(max(min(limit, 500), 1))
+        )
+
+        out: list[dict[str, Any]] = []
+        for doc in cursor:
+            created = doc.get("created_at")
+            created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
+            metadata = doc.get("metadata") or {}
+
+            out.append(
+                {
+                    "write_id": doc.get("write_id"),
+                    "session_id": doc.get("session_id"),
+                    "file_path": doc.get("file_path"),
+                    "title": metadata.get("title") or doc.get("file_path", "").split("/")[-1],
+                    "type": metadata.get("type") or "unknown",
+                    "size": len(doc.get("content") or ""),
+                    "created_at": created_at,
+                }
+            )
+        return list(reversed(out))
+
     def delete_chat_session(self, *, session_id: str, assistant_id: str | None = None) -> dict[str, int]:
         """删除某个会话在 MongoDB 下的所有聊天相关数据。"""
 
@@ -460,10 +531,14 @@ class MongoDbManager:
             sess_filter["assistant_id"] = assistant_id
         sess_res = self._chat_sessions_collection().delete_many(sess_filter)
 
+        fs_filter: dict[str, Any] = {"session_id": session_id}
+        fs_res = self._filesystem_writes_collection().delete_many(fs_filter)
+
         return {
             "messages": int(getattr(msg_res, "deleted_count", 0) or 0),
             "memories": int(getattr(mem_res, "deleted_count", 0) or 0),
             "sessions": int(getattr(sess_res, "deleted_count", 0) or 0),
+            "filesystem_writes": int(getattr(fs_res, "deleted_count", 0) or 0),
         }
 
     def list_chat_threads(self, *, assistant_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -543,6 +618,7 @@ _DEFAULT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_COLLECTION") or "uploaded_sour
 _DEFAULT_CHAT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_COLLECTION") or "chat_messages"
 _DEFAULT_CHAT_MEMORY_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_MEMORY_COLLECTION") or "agent_chat_memories"
 _DEFAULT_CHAT_SESSIONS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_SESSIONS_COLLECTION") or "chat_sessions"
+_DEFAULT_FILESYSTEM_WRITES_COLLECTION = os.getenv("DEEPAGENTS_MONGO_FILESYSTEM_WRITES_COLLECTION") or "filesystem_writes"
 
 
 def get_mongo_manager() -> MongoDbManager:

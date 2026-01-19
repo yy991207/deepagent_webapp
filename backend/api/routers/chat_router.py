@@ -13,6 +13,7 @@ from backend.database.mongo_manager import get_mongo_manager
 from backend.services.chat_stream_service import ChatStreamService
 from backend.utils.snowflake import generate_snowflake_id
 from backend.services.checkpoint_service import CheckpointService
+from backend.services.session_cancel_service import get_session_cancel_service
 
 
 router = APIRouter()
@@ -92,6 +93,17 @@ def update_chat_session(session_id: str, payload: dict[str, Any]) -> dict[str, A
     return {"success": True, "session_id": session_id, "title": title}
 
 
+@router.post("/api/chat/session/{session_id}/cancel")
+def cancel_chat_session(session_id: str) -> dict[str, Any]:
+    """取消会话的流式请求。
+    
+    标记会话为已取消，正在进行的 stream_chat 会检测到并中断。
+    """
+    cancel_service = get_session_cancel_service()
+    cancel_service.cancel(session_id)
+    return {"success": True, "session_id": session_id, "message": "会话已标记为取消"}
+
+
 @router.delete("/api/chat/session/{session_id}")
 async def delete_chat_session(session_id: str, assistant_id: str = "agent") -> dict[str, Any]:
     """删除会话及其所有数据。
@@ -99,7 +111,13 @@ async def delete_chat_session(session_id: str, assistant_id: str = "agent") -> d
     删除范围：
     - Mongo: chat_messages(含 tool 消息)、agent_chat_memories、chat_sessions
     - SQLite: checkpoints / writes
+    
+    删除前会先取消正在进行的流式请求。
     """
+    # 先取消正在进行的流式请求
+    cancel_service = get_session_cancel_service()
+    cancel_service.cancel(session_id)
+    
     mongo = get_mongo_manager()
     try:
         mongo_deleted = mongo.delete_chat_session(session_id=session_id, assistant_id=assistant_id)
@@ -111,6 +129,9 @@ async def delete_chat_session(session_id: str, assistant_id: str = "agent") -> d
         ck = await checkpoint_service.delete_session(session_id=session_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc) or "failed to delete checkpoints") from exc
+    
+    # 删除完成后清除取消标记
+    cancel_service.clear(session_id)
 
     return {
         "success": True,
@@ -131,9 +152,10 @@ def chat_history(session_id: str | None = None, thread_id: str | None = None, li
         raise HTTPException(status_code=400, detail="session_id is required")
     try:
         items = mongo.get_chat_history(thread_id=effective_id, limit=limit)
+        writes = mongo.list_filesystem_writes(session_id=effective_id, limit=100)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
-    return {"session_id": effective_id, "messages": items}
+    return {"session_id": effective_id, "messages": items, "writes": writes}
 
 
 @router.get("/api/chat/memory")
@@ -166,9 +188,11 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
                 assistant_id=assistant_id,
                 file_refs=file_refs,
             ):
+                # 每条 SSE 事件都带上 session_id，便于前端过滤旧会话事件
+                event["session_id"] = session_id
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc), 'session_id': session_id})}\n\n"
 
     return StreamingResponse(
         event_generator(),

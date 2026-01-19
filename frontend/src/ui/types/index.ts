@@ -111,14 +111,30 @@ export type AgentLog = {
    updated_at: string;
  };
 
-export type SocketPayload =
-  | { type: "chat.delta"; text: string }
-  | { type: "tool.start"; id: string; name: string; args: unknown }
-  | { type: "tool.end"; id: string; name: string; status: string; output: unknown }
-  | { type: "rag.references"; references: RagReference[] }
-  | { type: "suggested.questions"; questions: string[] }
-  | { type: "session.status"; status: string }
-  | { type: "error"; message: string };
+export type FilesystemWrite = {
+  write_id: string;
+  session_id: string;
+  file_path: string;
+  title: string;
+  type: string;
+  size: number;
+  created_at: string;
+};
+
+type SocketPayloadBase = {
+  session_id?: string;
+};
+
+export type SocketPayload = SocketPayloadBase &
+  (
+    | { type: "chat.delta"; text: string }
+    | { type: "tool.start"; id: string; name: string; args: unknown }
+    | { type: "tool.end"; id: string; name: string; status: string; output: unknown }
+    | { type: "rag.references"; references: RagReference[] }
+    | { type: "suggested.questions"; questions: string[] }
+    | { type: "session.status"; status: string }
+    | { type: "error"; message: string }
+  );
 
 export type PodcastTranscriptEntry = {
   speaker?: string;
