@@ -3,7 +3,7 @@ set -e
 
 ROOT_DIR="/Users/yang/deepagents-webapp"
 FRONTEND_DIR="$ROOT_DIR/frontend"
-BACKEND_MODULE="backend.web_app:app"
+BACKEND_MODULE="backend.main:app"
 BACKEND_HOST="127.0.0.1"
 BACKEND_PORT="7777"
 FRONTEND_PORT="5173"

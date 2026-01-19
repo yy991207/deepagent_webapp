@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from backend.main import app
+from backend.api.web_app import app
 
 __all__ = ["app"]

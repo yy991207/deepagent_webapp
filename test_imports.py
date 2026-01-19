@@ -29,8 +29,12 @@ except ImportError as e:
 
 try:
     print("4. 测试 FastAPI...")
-    from backend.web_app import app
-    print("   SUCCESS web_app 导入成功")
+    from backend.main import app
+    print("   SUCCESS main 导入成功")
+
+    from backend.web_app import app as legacy_app
+    _ = legacy_app
+    print("   SUCCESS web_app 兼容层导入成功")
 except ImportError as e:
     print(f"   FAIL web_app 导入失败: {e}")
 
