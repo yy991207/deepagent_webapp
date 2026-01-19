@@ -1,0 +1,117 @@
+/* --- Global Header --- */
+.app-header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.app-logo {
+  color: #000;
+  display: flex;
+  align-items: center;
+}
+
+.notebook-title {
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.create-note-btn {
+  background: #000000;
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.create-note-btn:hover {
+  opacity: 0.8;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn-header {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn-header:hover {
+  background-color: rgba(0,0,0,0.05);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #a8c0ff, #3f2b96);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+/* --- App Body (3 Columns) --- */
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr 340px;
+  overflow: hidden;
+  padding: 0; /* Remove padding for panel layout */
+  gap: 0; /* Remove gap for panel layout */
+  background-color: var(--bg-surface);
+}
+
+.app-body.left-collapsed {
+  grid-template-columns: 64px 1fr 340px;
+}
+
+.app-body.right-collapsed {
+  grid-template-columns: 280px 1fr 64px;
+}
+
+.app-body.both-collapsed {
+  grid-template-columns: 64px 1fr 64px;
+}
+
