@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from deepagents_cli.config import settings
@@ -18,6 +17,7 @@ from deepagents_cli.agent import create_cli_agent
 
 from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
+from backend.services.chat_ws_protocol import ChatWsProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +38,9 @@ class ChatWebSocketHandler:
     ) -> None:
         self._base_dir = base_dir
 
-    async def _send_json(self, ws: WebSocket, payload: dict[str, Any]) -> None:
-        if ws.client_state != WebSocketState.CONNECTED:
-            return
-        try:
-            await ws.send_text(json.dumps(payload, ensure_ascii=False))
-        except (WebSocketDisconnect, RuntimeError):
-            return
-
     async def handle(self, ws: WebSocket) -> None:
-        await ws.accept()
+        protocol = ChatWsProtocol(ws)
+        await protocol.accept()
 
         async with get_checkpointer() as checkpointer:
             model = create_model()
@@ -61,24 +54,23 @@ class ChatWebSocketHandler:
                     tool_buffers: dict[str | int, ToolBuffer] = {}
                     started_tools: set[str] = set()
 
-                    try:
-                        raw = await ws.receive_text()
-                    except (WebSocketDisconnect, RuntimeError):
+                    raw = await protocol.receive_text()
+                    if raw is None:
                         return
 
                     try:
                         payload = json.loads(raw)
                     except json.JSONDecodeError:
-                        await self._send_json(ws, {"type": "error", "message": "invalid json"})
+                        await protocol.send_json({"type": "error", "message": "invalid json"})
                         continue
 
                     if payload.get("type") != "chat.request":
-                        await self._send_json(ws, {"type": "error", "message": "unknown message type"})
+                        await protocol.send_json({"type": "error", "message": "unknown message type"})
                         continue
 
                     assistant_id = payload.get("assistant_id") or "agent"
                     if not settings._is_valid_agent_name(assistant_id):
-                        await self._send_json(ws, {"type": "error", "message": "invalid assistant_id"})
+                        await protocol.send_json({"type": "error", "message": "invalid assistant_id"})
                         continue
 
                     text = payload.get("text", "")
@@ -167,8 +159,7 @@ class ChatWebSocketHandler:
                             except Exception:
                                 pass
 
-                            await self._send_json(
-                                ws,
+                            await protocol.send_json(
                                 {
                                     "type": "tool.start",
                                     "id": tool_call_id,
@@ -204,8 +195,7 @@ class ChatWebSocketHandler:
 
                             if forced_rag_refs:
                                 rag_references = forced_rag_refs
-                                await self._send_json(
-                                    ws,
+                                await protocol.send_json(
                                     {
                                         "type": "rag.references",
                                         "references": forced_rag_refs,
@@ -237,8 +227,7 @@ class ChatWebSocketHandler:
                             except Exception:
                                 pass
 
-                            await self._send_json(
-                                ws,
+                            await protocol.send_json(
                                 {
                                     "type": "tool.end",
                                     "id": tool_call_id,
@@ -292,7 +281,7 @@ class ChatWebSocketHandler:
                         enable_shell=False,
                     )
 
-                    await self._send_json(ws, {"type": "session.status", "status": "thinking"})
+                    await protocol.send_json({"type": "session.status", "status": "thinking"})
 
                     effective_user_text = text
                     if forced_rag_refs:
@@ -343,8 +332,7 @@ class ChatWebSocketHandler:
                                             parsed = raw_content
                                         if isinstance(parsed, list):
                                             rag_references = [x for x in parsed if isinstance(x, dict)]
-                                            await self._send_json(
-                                                ws,
+                                            await protocol.send_json(
                                                 {
                                                     "type": "rag.references",
                                                     "references": rag_references,
@@ -371,8 +359,7 @@ class ChatWebSocketHandler:
                                     except Exception:
                                         pass
 
-                                    await self._send_json(
-                                        ws,
+                                    await protocol.send_json(
                                         {
                                             "type": "tool.end",
                                             "id": tool_id,
@@ -385,7 +372,7 @@ class ChatWebSocketHandler:
                                     if saw_tool_call and not active_tool_ids and pending_text_deltas:
                                         for delta in pending_text_deltas:
                                             assistant_accum.append(str(delta))
-                                            await self._send_json(ws, {"type": "chat.delta", "text": delta})
+                                            await protocol.send_json({"type": "chat.delta", "text": delta})
                                         pending_text_deltas = []
                                 continue
 
@@ -402,7 +389,7 @@ class ChatWebSocketHandler:
                                                 pending_text_deltas.append(str(text_delta))
                                             else:
                                                 assistant_accum.append(str(text_delta))
-                                                await self._send_json(ws, {"type": "chat.delta", "text": text_delta})
+                                                await protocol.send_json({"type": "chat.delta", "text": text_delta})
                                     elif block_type in ("tool_call_chunk", "tool_call"):
                                         chunk_name = block.get("name")
                                         chunk_args = block.get("args")
@@ -451,8 +438,7 @@ class ChatWebSocketHandler:
                                             except Exception:
                                                 pass
 
-                                            await self._send_json(
-                                                ws,
+                                            await protocol.send_json(
                                                 {
                                                     "type": "tool.start",
                                                     "id": buffer.tool_id,
@@ -469,7 +455,7 @@ class ChatWebSocketHandler:
                                         pending_text_deltas.append(str(text_delta))
                                     else:
                                         assistant_accum.append(str(text_delta))
-                                        await self._send_json(ws, {"type": "chat.delta", "text": text_delta})
+                                        await protocol.send_json({"type": "chat.delta", "text": text_delta})
 
                                 if hasattr(message, "tool_calls") and message.tool_calls:
                                     for tc in message.tool_calls:
@@ -500,8 +486,7 @@ class ChatWebSocketHandler:
                                             except Exception:
                                                 pass
 
-                                            await self._send_json(
-                                                ws,
+                                            await protocol.send_json(
                                                 {
                                                     "type": "tool.start",
                                                     "id": tc_id,
@@ -512,7 +497,7 @@ class ChatWebSocketHandler:
                                             started_tools.add(tc_id)
 
                     except Exception as exc:  # noqa: BLE001
-                        await self._send_json(ws, {"type": "error", "message": str(exc) or "unknown error"})
+                        await protocol.send_json({"type": "error", "message": str(exc) or "unknown error"})
 
                     finally:
                         try:
@@ -542,8 +527,7 @@ AI 回答：{assistant_text[:500]}
                                     ][:3]
 
                                     if suggested_questions:
-                                        await self._send_json(
-                                            ws,
+                                        await protocol.send_json(
                                             {
                                                 "type": "suggested.questions",
                                                 "questions": suggested_questions,
@@ -571,7 +555,7 @@ AI 回答：{assistant_text[:500]}
                         except Exception:
                             pass
 
-                        await self._send_json(ws, {"type": "session.status", "status": "done"})
+                        await protocol.send_json({"type": "session.status", "status": "done"})
 
             except WebSocketDisconnect:
                 return

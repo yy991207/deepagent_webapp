@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi.responses import StreamingResponse
 
 from backend.database.mongo_manager import get_mongo_manager
 from backend.services.chat_ws_handler import ChatWebSocketHandler
+from backend.services.chat_stream_service import ChatStreamService
 
 
 router = APIRouter()
@@ -44,6 +48,41 @@ def chat_memory(thread_id: str, assistant_id: str = "agent") -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
     return {"thread_id": thread_id, "assistant_id": assistant_id, "memory_text": memory_text}
+
+
+@router.post("/api/chat/stream")
+async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
+    text = str(payload.get("text") or "").strip()
+    thread_id = str(payload.get("thread_id") or f"web-{uuid.uuid4().hex[:8]}")
+    assistant_id = str(payload.get("assistant_id") or "agent")
+    file_refs = payload.get("files") or []
+
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    service = ChatStreamService(base_dir=BASE_DIR)
+
+    async def event_generator():
+        try:
+            async for event in service.stream_chat(
+                text=text,
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+                file_refs=file_refs,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.websocket("/ws/chat")
