@@ -5,11 +5,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.database.mongo_manager import get_mongo_manager
-from backend.services.chat_ws_handler import ChatWebSocketHandler
 from backend.services.chat_stream_service import ChatStreamService
 
 
@@ -85,7 +84,3 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
     )
 
 
-@router.websocket("/ws/chat")
-async def chat_socket(ws: WebSocket) -> None:
-    handler = ChatWebSocketHandler(base_dir=BASE_DIR)
-    await handler.handle(ws)

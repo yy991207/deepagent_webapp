@@ -409,7 +409,7 @@ function App() {
   const [podcastRunDetail, setPodcastRunDetail] = useState<PodcastRunDetail | null>(null);
   const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
 
-  const socketRef = useRef<WebSocket | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const assistantBufferRef = useRef({ id: "", text: "" });
   const pendingAssistantIdRef = useRef<string | null>(null);
   const pendingRefsRef = useRef<RagReference[] | null>(null);
@@ -443,12 +443,11 @@ function App() {
   useEffect(() => {
     fetchTree();
     void fetchSources();
-    connectSocket();
     void fetchChatHistory(threadId);
     void fetchPodcastSpeakerProfiles();
     void fetchPodcastRuns();
     return () => {
-      socketRef.current?.close();
+      abortControllerRef.current?.abort();
     };
   }, []);
 
@@ -809,20 +808,6 @@ function App() {
     });
   };
 
-  const connectSocket = () => {
-    const socket = new WebSocket(`ws://${window.location.host}/ws/chat`);
-    socketRef.current = socket;
-
-    socket.addEventListener("open", () => {
-      setStatus("连接已建立");
-      addLog("System connected", "info");
-    });
-    socket.addEventListener("close", () => setStatus("连接已关闭"));
-    socket.addEventListener("message", (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as SocketPayload;
-      handleSocketPayload(payload);
-    });
-  };
 
   const handleSocketPayload = (payload: SocketPayload) => {
     if (payload.type === "rag.references") {
@@ -932,13 +917,7 @@ function App() {
     }
   };
 
-  const sendMessage = () => {
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setStatus("连接不可用，正在重连");
-      connectSocket();
-      return;
-    }
+  const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed) {
       return;
@@ -955,16 +934,65 @@ function App() {
       { id: createId(), role: "user", content: trimmed, attachments, timestamp: userTimestamp },
     ]);
     setStatus("思考中...");
-    socket.send(
-      JSON.stringify({
-        type: "chat.request",
-        text: trimmed,
-        files: selectedList,
-        thread_id: threadId,
-      })
-    );
     setInput("");
     setSelectedFiles(new Set());
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    try {
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: trimmed,
+          files: selectedList,
+          thread_id: threadId,
+          assistant_id: "agent",
+        }),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const json = line.slice(6);
+            try {
+              const payload = JSON.parse(json) as SocketPayload;
+              handleSocketPayload(payload);
+            } catch (e) {
+              console.error("Failed to parse SSE event:", e);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      if (error.name !== "AbortError") {
+        setStatus("连接失败");
+        addLog(`Error: ${error.message}`, "error");
+      }
+    } finally {
+      abortControllerRef.current = null;
+    }
   };
 
   const openRefModal = async (refs: RagReference[] | undefined, idx: number) => {
