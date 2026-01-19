@@ -1,0 +1,30 @@
+# DeepAgents 核心库（从 PyPI 安装）
+deepagents>=0.3.6
+langchain>=1.2.3
+langchain-openai>=1.1.7
+langgraph-checkpoint-sqlite>=3.0.0
+
+# Web 框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# 数据库
+pymongo>=4.9.0
+
+# RAG 检索
+llama-index
+llama-index-embeddings-dashscope
+dashscope
+
+# 播客生成
+podcast-creator>=0.7.0
+edge-tts>=7.2.7
+
+# 网络搜索
+tavily-python
+
+# 工具库
+requests
+markdownify
+python-dotenv
+pyyaml

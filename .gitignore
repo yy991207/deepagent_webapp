@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# 环境变量（包含敏感信息）
+.env
+
+# 运行时文件
+.runtime/
+*.pid
+*.log
+
+# 前端
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# 数据目录
+data/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+.claude/
+
+# MongoDB 数据
+*.bson

@@ -1,0 +1,2607 @@
+import type { ComponentChild } from "preact";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+
+// --- Types ---
+
+type TreeNode = {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+  children?: TreeNode[];
+};
+
+type UploadedSource = {
+  id: string;
+  filename: string;
+  rel_path?: string;
+  size?: number;
+  created_at?: string;
+};
+
+type UploadedSourceDetail = UploadedSource & {
+  sha256?: string;
+  content_preview?: string | null;
+};
+
+type PodcastSpeakerProfile = {
+  id: string;
+  name: string;
+  description: string;
+  tts_provider: string;
+  tts_model: string;
+  speakers: Array<{ name: string; voice_id: string; backstory: string; personality: string }>;
+};
+
+type PodcastRunSummary = {
+  run_id: string;
+  status: string;
+  episode_profile: string;
+  speaker_profile: string;
+  episode_name: string;
+  created_at: string;
+  updated_at: string;
+  message?: string;
+};
+
+type PodcastRunDetail = {
+  run: PodcastRunSummary;
+  result: null | {
+    run_id: string;
+    episode_profile: string;
+    speaker_profile: string;
+    episode_name: string;
+    audio_file_path: string | null;
+    transcript: unknown;
+    outline: unknown;
+    created_at: string;
+    processing_time?: number;
+  };
+};
+
+type RagReference = {
+  index: number;
+  source?: string;
+  mongo_id?: string;
+  text?: string;
+};
+
+type UrlReference = {
+  index: number;
+  url: string;
+};
+
+type AttachmentMeta =
+  | string
+  | {
+      mongo_id: string;
+      filename?: string;
+    };
+
+type ChatMessage =
+  | {
+      id: string;
+      role: "user" | "assistant";
+      content: string;
+      attachments?: AttachmentMeta[];
+      references?: RagReference[];
+      suggestedQuestions?: string[];
+      isPending?: boolean;
+      timestamp?: string;
+    }
+  | {
+      id: string;
+      role: "tool";
+      toolCallId: string;
+      toolName: string;
+      status: "running" | "done" | "error";
+      args?: unknown;
+      output?: unknown;
+      startedAt?: string;
+      endedAt?: string;
+    };
+
+type AgentLog = {
+  id: string;
+  agentId: string;
+  timestamp: string;
+  message: string;
+  type: "info" | "error" | "tool";
+};
+
+type SocketPayload =
+  | { type: "chat.delta"; text: string }
+  | { type: "tool.start"; id: string; name: string; args: unknown }
+  | { type: "tool.end"; id: string; name: string; status: string; output: unknown }
+  | { type: "rag.references"; references: RagReference[] }
+  | { type: "suggested.questions"; questions: string[] }
+  | { type: "session.status"; status: string }
+  | { type: "error"; message: string };
+
+const formatJson = (value: unknown) => {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+type PodcastTranscriptEntry = {
+  speaker?: string;
+  dialogue?: string;
+};
+
+const extractPodcastTranscript = (value: unknown): PodcastTranscriptEntry[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((x) => {
+        if (!x || typeof x !== "object") return null;
+        const anyX = x as Record<string, unknown>;
+        const speaker = typeof anyX.speaker === "string" ? anyX.speaker : "";
+        const dialogue = typeof anyX.dialogue === "string" ? anyX.dialogue : "";
+        if (!speaker || !dialogue) return null;
+        return { speaker, dialogue };
+      })
+      .filter(Boolean) as PodcastTranscriptEntry[];
+  }
+
+  if (value && typeof value === "object" && "transcript" in value) {
+    const anyV = value as Record<string, unknown>;
+    return extractPodcastTranscript(anyV.transcript);
+  }
+
+  return [];
+};
+
+const maxRefIndex = (refs: RagReference[] | undefined) => {
+  if (!refs || refs.length === 0) return 0;
+  let max = 0;
+  for (const r of refs) {
+    if (typeof r.index === "number" && r.index > max) {
+      max = r.index;
+    }
+  }
+  return max;
+};
+
+const extractUrlReferences = (input: string, startIndex: number): { text: string; urlRefs: UrlReference[] } => {
+  const reUrl = /(https?:\/\/[^\s)\]}>,"']+)/g;
+  const found: string[] = [];
+
+  let m: RegExpExecArray | null;
+  while ((m = reUrl.exec(input)) !== null) {
+    found.push(m[1]);
+  }
+
+  const unique: string[] = [];
+  for (const u of found) {
+    if (!unique.includes(u)) {
+      unique.push(u);
+    }
+  }
+
+  const urlRefs: UrlReference[] = unique.map((url, i) => ({ index: startIndex + i, url }));
+  let text = input;
+  for (const r of urlRefs) {
+    text = text.split(r.url).join(`[${r.index}]`);
+  }
+
+  return { text, urlRefs };
+};
+
+const getFaviconUrl = (url: string) => {
+  try {
+    const u = new URL(url);
+    return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(u.hostname)}`;
+  } catch {
+    return "";
+  }
+};
+
+const upsertToolMessage = (
+  prev: ChatMessage[],
+  nextTool: Omit<Extract<ChatMessage, { role: "tool" }>, "role" | "id">,
+): ChatMessage[] => {
+  const id = nextTool.toolCallId;
+  const existingIndex = prev.findIndex(
+    (m) => m.role === "tool" && (m as Extract<ChatMessage, { role: "tool" }>).toolCallId === id,
+  );
+
+  const merged: Extract<ChatMessage, { role: "tool" }> =
+    existingIndex >= 0
+      ? ({
+          ...(prev[existingIndex] as Extract<ChatMessage, { role: "tool" }>),
+          ...nextTool,
+          role: "tool",
+        } as Extract<ChatMessage, { role: "tool" }>)
+      : ({
+          id,
+          role: "tool",
+          ...nextTool,
+        } as Extract<ChatMessage, { role: "tool" }>);
+
+  if (existingIndex >= 0) {
+    return prev.map((m, i) => (i === existingIndex ? merged : m));
+  }
+  return [...prev, merged];
+};
+
+// --- Icons ---
+const Icons = {
+  Logo: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>, // Simplified logo
+  NotebookLogo: () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+       <circle cx="12" cy="12" r="10" stroke="black" stroke-width="2" fill="none" />
+       <path d="M8 12a4 4 0 0 1 8 0" stroke="black" stroke-width="2" stroke-linecap="round" />
+       <path d="M12 8v8" stroke="black" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  ), // Mock abstract logo
+  Plus: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>,
+  Bolt: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M11 21h-1l1-7H7.5c-.67 0-1.04-.78-.62-1.3L14 3h1l-1 7h3.5c.67 0 1.04.78.62 1.3L11 21z" />
+    </svg>
+  ),
+  Globe: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm7.93 9h-3.17a15.53 15.53 0 0 0-1.05-4.3A8.02 8.02 0 0 1 19.93 11zM12 4c.92 1.23 1.67 3.04 2.07 5H9.93C10.33 7.04 11.08 5.23 12 4zM4.07 13h3.17c.21 1.52.62 2.98 1.05 4.3A8.02 8.02 0 0 1 4.07 13zm3.17-2H4.07a8.02 8.02 0 0 1 4.22-4.3c-.43 1.32-.84 2.78-1.05 4.3zM12 20c-.92-1.23-1.67-3.04-2.07-5h4.14c-.4 1.96-1.15 3.77-2.07 5zm2.78-2.7c.43-1.32.84-2.78 1.05-4.3h3.17a8.02 8.02 0 0 1-4.22 4.3zM16.76 11H7.24c.13-1.74.52-3.42 1.06-5h7.4c.54 1.58.93 3.26 1.06 5zm-9.52 2h9.52c-.13 1.74-.52 3.42-1.06 5h-7.4c-.54-1.58-.93-3.26-1.06-5z" />
+    </svg>
+  ),
+  ArrowRight: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 4l-1.41 1.41L15.17 10H4v2h11.17l-4.58 4.59L12 18l8-6z" />
+    </svg>
+  ),
+  Search: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>,
+  Send: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>,
+  Share: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92zm-9.52 2h9.52c-.13 1.74-.52 3.42-1.06 5h-7.4c-.54-1.58-.93-3.26-1.06-5z"/></svg>,
+  Settings: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>,
+  Apps: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>,
+  Sparkles: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6C7.8 12.16 7 10.63 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z"/></svg>,
+  Tool: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>,
+  ChevronRight: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>,
+  ChevronLeft: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l-1.41 1.41L8 12l4.59 4.59L14 18l-6-6z"/></svg>,
+  PanelCollapseLeft: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M9 5v14" />
+      <path d="M14.5 12l-2.5-2.5" stroke-linecap="round" />
+      <path d="M14.5 12l-2.5 2.5" stroke-linecap="round" />
+    </svg>
+  ),
+  PanelExpandLeft: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M9 5v14" />
+      <path d="M12 12l2.5-2.5" stroke-linecap="round" />
+      <path d="M12 12l2.5 2.5" stroke-linecap="round" />
+    </svg>
+  ),
+  PanelCollapseRight: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M15 5v14" />
+      <path d="M9.5 12l2.5-2.5" stroke-linecap="round" />
+      <path d="M9.5 12l2.5 2.5" stroke-linecap="round" />
+    </svg>
+  ),
+  PanelExpandRight: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M15 5v14" />
+      <path d="M12 12l-2.5-2.5" stroke-linecap="round" />
+      <path d="M12 12l-2.5 2.5" stroke-linecap="round" />
+    </svg>
+  ),
+  ChevronDown: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>,
+  Folder: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>,
+  Upload: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5 20h14v-2H5v2z" />
+      <path d="M19 12h-4V3H9v9H5l7 7 7-7z" />
+    </svg>
+  ),
+  Link: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4v-2H7c-2.82 0-5.1 2.28-5.1 5.1S4.18 17.1 7 17.1h4v-2H7c-1.71 0-3.1-1.39-3.1-3.1zm5.1 1h6v-2H9v2zm8-6.1h-4v2h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4v2h4c2.82 0 5.1-2.28 5.1-5.1s-2.28-5.1-5.1-5.1z" />
+    </svg>
+  ),
+  Copy: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>,
+  ThumbUp: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-1.91l-.01-.01L23 10z"/></svg>,
+  ThumbDown: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v1.91l.01.01L1 14c0 1.1.9 2 2 2h6.31l.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>,
+  MoreVert: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>,
+  Drive: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 12l6 10.39h13L15 12H2zm21-1l-6-10.39H4L10 11h13zm-1 1l-6 10.39H2l6-10.39h15z" opacity="0.3"/><path d="M10.23 11.27l-6.12 10.6h12.76l6.12-10.6H10.23zM7.34 9.61l6.12-10.6H.7L6.81 9.61h.53zM15.49 11.27l6.12-10.6H8.89l-6.12 10.6h12.72z"/></svg>,
+  Pdf: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="#e53935"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v2.5zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h2v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>,
+  Sound: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.16-1.75 4.45-4H15V6h4V3h-7z"/></svg>,
+  MindMap: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 9h-2V7h-2v5H6v2h2v5h2v-5h2v-2z"/></svg>,
+  Video: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>,
+  Quiz: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zM10 9h8v2h-8zm0 3h4v2h-4zm0-6h8v2h-8z"/></svg>,
+  User: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>,
+  Mic: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>,
+};
+
+const createId = () => Math.random().toString(36).slice(2, 10);
+
+const getOrCreateThreadId = () => {
+  const key = "deepagents_thread_id";
+  try {
+    const stored = localStorage.getItem(key) || "";
+    const tid = stored || `web-${createId()}`;
+    localStorage.setItem(key, tid);
+    try {
+      sessionStorage.setItem(key, tid);
+    } catch {
+      // ignore
+    }
+    (window as any).__deepagents_thread_id = tid;
+    return tid;
+  } catch {
+    try {
+      const stored = sessionStorage.getItem(key) || "";
+      const tid = stored || `web-${createId()}`;
+      sessionStorage.setItem(key, tid);
+      (window as any).__deepagents_thread_id = tid;
+      return tid;
+    } catch {
+      const tid = `web-${createId()}`;
+      (window as any).__deepagents_thread_id = tid;
+      return tid;
+    }
+  }
+};
+
+// Mock Agents with Colors
+const AGENTS = [
+  { id: "audio", name: "音频概览", Icon: Icons.Sound, color: "#e1f5fe" }, 
+  { id: "mindmap", name: "思维导图", Icon: Icons.MindMap, color: "#f3e5f5" },
+  { id: "video", name: "视频概览", Icon: Icons.Video, color: "#e8f5e9" },
+  { id: "quiz", name: "测验", Icon: Icons.Quiz, color: "#e0f2f1" },
+];
+
+function App() {
+  const [tree, setTree] = useState<TreeNode | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [status, setStatus] = useState("就绪");
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
+
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
+  const [urlDraft, setUrlDraft] = useState("");
+  const [urlMode, setUrlMode] = useState<"crawl" | "llm_summary">("crawl");
+  const [urlParseState, setUrlParseState] = useState<
+    | { status: "idle" }
+    | { status: "parsing" }
+    | { status: "ready"; filename: string; content: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const [uploadState, setUploadState] = useState<
+    | { status: "idle" }
+    | { status: "ready"; count: number }
+    | { status: "uploading"; count: number }
+    | { status: "done"; count: number }
+    | { status: "error"; count: number; message: string }
+  >({ status: "idle" });
+  const directoryInputRef = useRef<HTMLInputElement>(null);
+
+  const [sources, setSources] = useState<UploadedSource[]>([]);
+  const [sourceDetailOpen, setSourceDetailOpen] = useState(false);
+  const [sourceDetail, setSourceDetail] = useState<UploadedSourceDetail | null>(null);
+  const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
+  
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [logs, setLogs] = useState<AgentLog[]>([]);
+
+  const [podcastConfigOpen, setPodcastConfigOpen] = useState(false);
+  const [podcastSpeakerProfiles, setPodcastSpeakerProfiles] = useState<PodcastSpeakerProfile[]>([]);
+  const [podcastSelectedSpeaker, setPodcastSelectedSpeaker] = useState<string>("");
+  const [podcastEpisodeName, setPodcastEpisodeName] = useState<string>("");
+  const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState<string>("");
+  const [podcastSelectedSourceIds, setPodcastSelectedSourceIds] = useState<Set<string>>(new Set());
+  const [podcastSources, setPodcastSources] = useState<UploadedSource[]>([]);
+  const [podcastSourcesLoading, setPodcastSourcesLoading] = useState(false);
+  const [podcastRuns, setPodcastRuns] = useState<PodcastRunSummary[]>([]);
+  const [podcastRunDetailOpen, setPodcastRunDetailOpen] = useState(false);
+  const [podcastRunDetail, setPodcastRunDetail] = useState<PodcastRunDetail | null>(null);
+  const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
+
+  const socketRef = useRef<WebSocket | null>(null);
+  const assistantBufferRef = useRef({ id: "", text: "" });
+  const pendingAssistantIdRef = useRef<string | null>(null);
+  const pendingRefsRef = useRef<RagReference[] | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [threadId, setThreadId] = useState<string>(() => getOrCreateThreadId());
+
+  const [refModalOpen, setRefModalOpen] = useState(false);
+  const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
+  const [refModalRefs, setRefModalRefs] = useState<RagReference[] | null>(null);
+  const [refModalFileContent, setRefModalFileContent] = useState<string>("");
+  const [refModalFileLoading, setRefModalFileLoading] = useState(false);
+
+  const selectedList = useMemo(() => Array.from(selectedFiles), [selectedFiles]);
+
+  const selectedAttachmentNames = useMemo(() => {
+    const map = new Map(sources.map((s) => [s.id, s.filename] as const));
+    return selectedList.map((id) => map.get(id) || id);
+  }, [selectedList, sources]);
+
+  const allFilePaths = useMemo(() => sources.map((s) => s.id), [sources]);
+
+  const setAllSelected = (checked: boolean) => {
+    if (!checked) {
+      setSelectedFiles(new Set());
+      return;
+    }
+    setSelectedFiles(new Set(allFilePaths));
+  };
+
+  useEffect(() => {
+    fetchTree();
+    void fetchSources();
+    connectSocket();
+    void fetchChatHistory(threadId);
+    void fetchPodcastSpeakerProfiles();
+    void fetchPodcastRuns();
+    return () => {
+      socketRef.current?.close();
+    };
+  }, []);
+
+  const fetchPodcastSpeakerProfiles = async () => {
+    const resp = await fetch("/api/podcast/speaker-profiles");
+    if (!resp.ok) {
+      return;
+    }
+    const data = (await resp.json()) as { results?: PodcastSpeakerProfile[] };
+    setPodcastSpeakerProfiles(Array.isArray(data.results) ? data.results : []);
+  };
+
+  const fetchPodcastRuns = async () => {
+    const resp = await fetch("/api/podcast/runs?limit=50");
+    if (!resp.ok) {
+      return;
+    }
+    const data = (await resp.json()) as { results?: PodcastRunSummary[] };
+    setPodcastRuns(Array.isArray(data.results) ? data.results : []);
+  };
+
+  const fetchPodcastSources = async (q: string) => {
+    setPodcastSourcesLoading(true);
+    try {
+      const response = await fetch(
+        `/api/sources/list?q=${encodeURIComponent(q || "")}&limit=500&skip=0`,
+      );
+      if (!response.ok) {
+        setPodcastSources([]);
+        return;
+      }
+      const data = (await response.json()) as { results?: UploadedSource[] };
+      setPodcastSources(Array.isArray(data.results) ? data.results : []);
+    } finally {
+      setPodcastSourcesLoading(false);
+    }
+  };
+
+  const openPodcastRunDetail = async (runId: string) => {
+    setPodcastRunDetailOpen(true);
+    setPodcastRunDetailLoading(true);
+    setPodcastRunDetail(null);
+    try {
+      const resp = await fetch(`/api/podcast/runs/${encodeURIComponent(runId)}`);
+      if (!resp.ok) {
+        return;
+      }
+      const data = (await resp.json()) as PodcastRunDetail;
+      setPodcastRunDetail(data);
+    } finally {
+      setPodcastRunDetailLoading(false);
+    }
+  };
+
+  const togglePodcastSource = (id: string) => {
+    setPodcastSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const setAllPodcastSources = (checked: boolean) => {
+    if (!checked) {
+      setPodcastSelectedSourceIds(new Set());
+      return;
+    }
+    setPodcastSelectedSourceIds(new Set(podcastSources.map((s) => s.id)));
+  };
+
+  const startPodcastGeneration = async () => {
+    if (!podcastSelectedSpeaker) {
+      setPodcastConfigOpen(true);
+      return;
+    }
+    if (!podcastEpisodeName.trim()) {
+      setPodcastConfigOpen(true);
+      return;
+    }
+    const selectedSourceIds = Array.from(podcastSelectedSourceIds);
+    if (selectedSourceIds.length === 0) {
+      setPodcastConfigOpen(true);
+      return;
+    }
+
+    const payload = {
+      episode_profile: "tech_discussion",
+      speaker_profile: podcastSelectedSpeaker,
+      episode_name: podcastEpisodeName.trim(),
+      source_ids: selectedSourceIds,
+      briefing_suffix: podcastBriefingSuffix.trim() ? podcastBriefingSuffix.trim() : undefined,
+    };
+
+    const resp = await fetch("/api/podcast/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      addLog(text || "播客生成触发失败", "error");
+      return;
+    }
+    addLog("已触发播客生成", "info");
+    await fetchPodcastRuns();
+  };
+
+  const fetchChatHistory = async (tid: string) => {
+    const resp = await fetch(`/api/chat/history?thread_id=${encodeURIComponent(tid)}&limit=200`);
+    if (!resp.ok) {
+      return;
+    }
+    const data = (await resp.json()) as {
+      messages?: Array<{
+        id: string;
+        role: string;
+        content: string;
+        attachments?: AttachmentMeta[];
+        references?: RagReference[];
+        suggested_questions?: string[];
+        created_at?: string;
+        tool_call_id?: string | null;
+        tool_name?: string | null;
+        tool_args?: unknown;
+        tool_status?: string | null;
+        tool_output?: unknown;
+        started_at?: string | null;
+        ended_at?: string | null;
+      }>;
+    };
+    const items = Array.isArray(data.messages) ? data.messages : [];
+    const mapped: ChatMessage[] = items
+      .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "tool")
+      .map((m) => {
+        const timestamp = m.created_at
+          ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : undefined;
+
+        if (m.role === "tool") {
+          const toolCallId = String(m.tool_call_id || m.id);
+          return {
+            id: toolCallId,
+            role: "tool",
+            toolCallId,
+            toolName: String(m.tool_name || "tool"),
+            status:
+              (m.tool_status || "done") === "running"
+                ? "running"
+                : (m.tool_status || "done") === "error"
+                  ? "error"
+                  : "done",
+            args: m.tool_args,
+            output: m.tool_output,
+            startedAt: m.started_at || undefined,
+            endedAt: m.ended_at || undefined,
+          };
+        }
+
+        return {
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          content: m.content || "",
+          attachments: m.attachments || [],
+          references: m.references || [],
+          suggestedQuestions: m.suggested_questions || [],
+          timestamp,
+        };
+      });
+    setMessages(mapped);
+  };
+
+  useEffect(() => {
+    const el = directoryInputRef.current;
+    if (!el) {
+      return;
+    }
+    el.value = "";
+  }, [directoryInputRef]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const addLog = (message: string, type: "info" | "error" | "tool" = "info") => {
+    setLogs(prev => [
+      {
+        id: createId(),
+        agentId: "main",
+        timestamp: new Date().toLocaleTimeString(),
+        message,
+        type
+      },
+      ...prev
+    ]);
+  };
+
+  const fetchTree = async () => {
+    const response = await fetch("/api/fs/tree");
+    if (!response.ok) {
+      setTree(null);
+      return;
+    }
+    const data = (await response.json()) as TreeNode;
+    setTree(data);
+  };
+
+  const fetchSources = async () => {
+    const response = await fetch(`/api/sources/list?q=${encodeURIComponent(searchValue || "")}&limit=200&skip=0`);
+    if (!response.ok) {
+      setSources([]);
+      return;
+    }
+    const data = (await response.json()) as { results?: UploadedSource[] };
+    setSources(Array.isArray(data.results) ? data.results : []);
+  };
+
+  useEffect(() => {
+    if (!podcastConfigOpen) {
+      return;
+    }
+    void fetchPodcastSources("");
+  }, [podcastConfigOpen]);
+
+  const openSourceDetail = async (src: UploadedSource) => {
+    setSourceDetailOpen(true);
+    setSourceDetailLoading(true);
+    setSourceDetail(null);
+    try {
+      const resp = await fetch(`/api/sources/detail?id=${encodeURIComponent(src.id)}&max_bytes=200000`);
+      if (!resp.ok) {
+        setSourceDetail({ ...src, content_preview: null });
+        return;
+      }
+      const detail = (await resp.json()) as UploadedSourceDetail;
+      setSourceDetail(detail);
+    } finally {
+      setSourceDetailLoading(false);
+    }
+  };
+
+  const parseUrlToPreview = async () => {
+    const url = urlDraft.trim();
+    if (!url) {
+      setUrlParseState({ status: "error", message: "请先输入 URL" });
+      return;
+    }
+    setUrlParseState({ status: "parsing" });
+    try {
+      const resp = await fetch("/api/sources/url/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, mode: urlMode }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        setUrlParseState({ status: "error", message: text || "解析失败" });
+        return;
+      }
+      const data = (await resp.json()) as { filename?: string; content?: string };
+      const filename = String(data.filename || "url.md");
+      const content = String(data.content || "");
+      setUrlParseState({ status: "ready", filename, content });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "解析失败";
+      setUrlParseState({ status: "error", message: msg });
+    }
+  };
+
+  const uploadParsedUrl = async () => {
+    if (urlParseState.status !== "ready") return;
+    const blob = new Blob([urlParseState.content], { type: "text/markdown;charset=utf-8" });
+    const f = new File([blob], urlParseState.filename, { type: "text/markdown" });
+    await startUpload([f]);
+  };
+
+  const chooseUploadFiles = () => {
+    directoryInputRef.current?.click();
+  };
+
+  const uploadPendingFiles = async () => {
+    if (!pendingUploadFiles.length) return;
+    await startUpload(pendingUploadFiles);
+    setPendingUploadFiles([]);
+  };
+
+  const onDirectoryChosen = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const list = Array.from(input.files || []);
+    setPendingUploadFiles(list);
+    if (list.length > 0) {
+      setUploadState({ status: "ready", count: list.length });
+    } else {
+      setUploadState({ status: "idle" });
+    }
+  };
+
+  const startUpload = async (files: File[]) => {
+    if (!files.length) {
+      return;
+    }
+    setUploadState({ status: "uploading", count: files.length });
+    try {
+      const form = new FormData();
+      for (const f of files) {
+        const anyFile = f as unknown as { webkitRelativePath?: string };
+        const name = anyFile.webkitRelativePath || f.name;
+        form.append("files", f, name);
+      }
+      const resp = await fetch("/api/sources/upload", {
+        method: "POST",
+        body: form,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        setUploadState({ status: "error", count: files.length, message: text || "上传失败" });
+        return;
+      }
+      setUploadState({ status: "done", count: files.length });
+      await fetchSources();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "上传失败";
+      setUploadState({ status: "error", count: files.length, message: msg });
+    }
+  };
+
+  const closeAddSource = () => {
+    setAddSourceOpen(false);
+    setUrlDraft("");
+    setUrlParseState({ status: "idle" });
+    setPendingUploadFiles([]);
+  };
+
+  const searchFiles = async (query: string) => {
+    setSearchValue(query);
+    const response = await fetch(`/api/sources/list?q=${encodeURIComponent(query || "")}`);
+    if (!response.ok) {
+      setSources([]);
+      return;
+    }
+    const data = (await response.json()) as { results?: UploadedSource[] };
+    setSources(Array.isArray(data.results) ? data.results : []);
+  };
+
+  const toggleSelected = (path: string) => {
+    setSelectedFiles((prev: Set<string>) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const connectSocket = () => {
+    const socket = new WebSocket(`ws://${window.location.host}/ws/chat`);
+    socketRef.current = socket;
+
+    socket.addEventListener("open", () => {
+      setStatus("连接已建立");
+      addLog("System connected", "info");
+    });
+    socket.addEventListener("close", () => setStatus("连接已关闭"));
+    socket.addEventListener("message", (event: MessageEvent<string>) => {
+      const payload = JSON.parse(event.data) as SocketPayload;
+      handleSocketPayload(payload);
+    });
+  };
+
+  const handleSocketPayload = (payload: SocketPayload) => {
+    if (payload.type === "rag.references") {
+      pendingRefsRef.current = payload.references || [];
+      if (assistantBufferRef.current.id) {
+        setMessages((prev: ChatMessage[]) =>
+          prev.map((m: ChatMessage) =>
+            m.id === assistantBufferRef.current.id && m.role === "assistant"
+              ? { ...m, references: pendingRefsRef.current || [] }
+              : m
+          )
+        );
+      }
+      return;
+    }
+    if (payload.type === "suggested.questions") {
+      if (assistantBufferRef.current.id) {
+        setMessages((prev: ChatMessage[]) =>
+          prev.map((m: ChatMessage) =>
+            m.id === assistantBufferRef.current.id && m.role === "assistant"
+              ? { ...m, suggestedQuestions: payload.questions || [] }
+              : m
+          )
+        );
+      }
+      return;
+    }
+    if (payload.type === "chat.delta") {
+      const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      if (!assistantBufferRef.current.id) {
+        const id = pendingAssistantIdRef.current || createId();
+        assistantBufferRef.current = { id, text: "" };
+        setMessages((prev: ChatMessage[]) => {
+          const exists = prev.some((m) => m.id === id);
+          if (exists) {
+            return prev.map((m) =>
+              m.id === id && m.role === "assistant"
+                ? { ...m, timestamp, isPending: false, references: pendingRefsRef.current || m.references }
+                : m
+            );
+          }
+          return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [] }];
+        });
+      }
+      assistantBufferRef.current.text += payload.text;
+      setMessages((prev: ChatMessage[]) =>
+        prev.map((msg: ChatMessage) =>
+          msg.id === assistantBufferRef.current.id
+            ? { ...msg, content: assistantBufferRef.current.text }
+            : msg
+        )
+      );
+      return;
+    }
+    if (payload.type === "tool.start") {
+      addLog(`Tool Start: ${payload.name}`, "tool");
+      const startedAt = new Date().toISOString();
+      setMessages((prev: ChatMessage[]) =>
+        upsertToolMessage(prev, {
+          toolCallId: payload.id,
+          toolName: payload.name,
+          status: "running",
+          args: payload.args,
+          startedAt,
+        }),
+      );
+      return;
+    }
+    if (payload.type === "tool.end") {
+      addLog(`Tool End: ${payload.name}`, "tool");
+      const endedAt = new Date().toISOString();
+      setMessages((prev: ChatMessage[]) =>
+        upsertToolMessage(prev, {
+          toolCallId: payload.id,
+          toolName: payload.name,
+          status: payload.status === "error" ? "error" : "done",
+          output: payload.output,
+          endedAt,
+        }),
+      );
+      return;
+    }
+    if (payload.type === "session.status") {
+      if (payload.status === "thinking") {
+        setStatus("思考中...");
+      }
+      if (payload.status === "done") {
+        setStatus("就绪");
+        assistantBufferRef.current = { id: "", text: "" };
+        pendingAssistantIdRef.current = null;
+        pendingRefsRef.current = null;
+      }
+      return;
+    }
+    if (payload.type === "error") {
+      addLog(`Error: ${payload.message}`, "error");
+      const toolCallId = createId();
+      setMessages((prev: ChatMessage[]) =>
+        upsertToolMessage(prev, {
+          toolCallId,
+          toolName: "Error",
+          status: "error",
+          output: payload.message || "Unknown error",
+          endedAt: new Date().toISOString(),
+        }),
+      );
+    }
+  };
+
+  const sendMessage = () => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setStatus("连接不可用，正在重连");
+      connectSocket();
+      return;
+    }
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return;
+    }
+    const attachments = selectedAttachmentNames;
+    const pendingAssistantId = createId();
+    pendingAssistantIdRef.current = pendingAssistantId;
+    pendingRefsRef.current = null;
+
+    const userTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    setMessages((prev: ChatMessage[]) => [
+      ...prev,
+      { id: createId(), role: "user", content: trimmed, attachments, timestamp: userTimestamp },
+    ]);
+    setStatus("思考中...");
+    socket.send(
+      JSON.stringify({
+        type: "chat.request",
+        text: trimmed,
+        files: selectedList,
+        thread_id: threadId,
+      })
+    );
+    setInput("");
+    setSelectedFiles(new Set());
+  };
+
+  const openRefModal = async (refs: RagReference[] | undefined, idx: number) => {
+    if (!refs || !refs.length) {
+      return;
+    }
+    setRefModalRefs(refs);
+    setRefModalIndex(idx);
+    setRefModalFileContent("");
+    setRefModalOpen(true);
+
+    const match = refs.find((r) => r.index === idx);
+    const source = match?.source;
+    const mongoId = match?.mongo_id;
+    if (!source && !mongoId) {
+      return;
+    }
+    setRefModalFileLoading(true);
+    try {
+      if (mongoId) {
+        const resp = await fetch(`/api/sources/detail?id=${encodeURIComponent(mongoId)}&max_bytes=200000`);
+        if (resp.ok) {
+          const data = (await resp.json()) as { content_preview?: string | null };
+          setRefModalFileContent(data.content_preview || "");
+        }
+      } else if (source) {
+        const resp = await fetch(`/api/fs/read?path=${encodeURIComponent(source)}&limit=400`);
+        if (resp.ok) {
+          const data = (await resp.json()) as { content?: string };
+          setRefModalFileContent(data.content || "");
+        }
+      }
+    } finally {
+      setRefModalFileLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <div class="app-root">
+      {/* Global Header */}
+      <header class="app-header">
+        <div class="header-left">
+          <div class="app-logo">
+            <Icons.NotebookLogo />
+          </div>
+          <h1 class="notebook-title">DeepAgents: AI Coding Assistant & Researcher</h1>
+        </div>
+        <div class="header-right">
+          <button class="create-note-btn">
+            <Icons.Plus />
+            创建笔记本
+          </button>
+          <div class="header-actions">
+            <button class="icon-btn-header">
+              <Icons.Share />
+              <span style={{marginLeft: 4, fontSize: 14, fontWeight: 500}}>分享</span>
+            </button>
+            <button class="icon-btn-header"><Icons.Settings /></button>
+            <button class="icon-btn-header"><Icons.Apps /></button>
+            <div class="user-avatar">Y</div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Body (Three Columns) */}
+      <div
+        class={`app-body ${isLeftCollapsed ? "left-collapsed" : ""} ${
+          isRightCollapsed ? "right-collapsed" : ""
+        } ${isLeftCollapsed && isRightCollapsed ? "both-collapsed" : ""}`}
+      >
+        {/* Left Sidebar: Sources */}
+        <aside class="sidebar left-sidebar">
+          {isLeftCollapsed ? (
+            <div class="sidebar-rail">
+              <button
+                class="sidebar-collapse-icon-btn"
+                onClick={() => setIsLeftCollapsed(false)}
+                aria-label="展开来源"
+                type="button"
+              >
+                <Icons.PanelExpandLeft />
+              </button>
+            </div>
+          ) : (
+            <div class="sidebar-card">
+              <div class="sidebar-header">
+                <h2>来源</h2>
+                <div class="sidebar-header-actions">
+                  <div class="icon-btn"><Icons.Settings /></div>
+                  <button
+                    class="sidebar-collapse-icon-btn"
+                    onClick={() => setIsLeftCollapsed(true)}
+                    aria-label="折叠来源"
+                    type="button"
+                  >
+                    <Icons.PanelCollapseLeft />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                class="add-source-btn"
+                type="button"
+                onClick={() => {
+                  setPendingUploadFiles([]);
+                  setUploadState({ status: "idle" });
+                  setAddSourceOpen(true);
+                }}
+              >
+                <Icons.Plus />
+                添加来源
+              </button>
+
+              <div class="source-hint-card">
+                <div class="source-hint-title">
+                  <div class="source-hint-icon"><Icons.Search /></div>
+                  <div class="source-hint-text">
+                    试用 <span class="source-hint-link">Deep Research</span>，获取深度报告和新来源！
+                  </div>
+                </div>
+              </div>
+
+              <div class="source-search-card">
+                <div class="source-search-input-row">
+                  <div class="source-search-icon"><Icons.Search /></div>
+                  <input
+                    class="source-search-input"
+                    placeholder="在网络中搜索新来源"
+                    value={searchValue}
+                    onInput={(e) => setSearchValue((e.target as HTMLInputElement).value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        searchFiles(searchValue);
+                      }
+                    }}
+                  />
+                </div>
+
+                <div class="source-search-controls">
+                  <button class="source-search-chip" type="button">
+                    <span class="chip-icon"><Icons.Globe /></span>
+                    <span class="chip-text">Web</span>
+                  </button>
+                  <button class="source-search-chip" type="button">
+                    <span class="chip-icon"><Icons.Bolt /></span>
+                    <span class="chip-text">Fast Research</span>
+                  </button>
+                  <button
+                    class="source-search-go"
+                    type="button"
+                    onClick={() => searchFiles(searchValue)}
+                  >
+                    <Icons.ArrowRight />
+                  </button>
+                </div>
+              </div>
+
+              <div class="source-list-header">
+                <span>选择所有来源</span>
+                <div class="checkbox-wrapper">
+                  <input
+                    type="checkbox"
+                    checked={allFilePaths.length > 0 && selectedFiles.size === allFilePaths.length}
+                    onChange={(e) => setAllSelected((e.target as HTMLInputElement).checked)}
+                  />
+                </div>
+              </div>
+
+              <div class="source-list">
+                {sources.length ? (
+                  <div class="file-list">
+                    {sources.map((s) => (
+                      <div key={s.id} class="file-item" onClick={() => openSourceDetail(s)}>
+                        <div class="file-icon"><Icons.Pdf /></div>
+                        <div class="file-name" title={s.rel_path || s.filename}>{s.filename}</div>
+                        <div class="checkbox-wrapper" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedFiles.has(s.id)}
+                            onChange={() => toggleSelected(s.id)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>暂无已上传文档</div>
+                )}
+              </div>
+
+              {uploadState.status !== "idle" && (
+                <div class="upload-status">
+                  {uploadState.status === "uploading" && (
+                    <div class="upload-status-row">
+                      <span class="upload-spinner" />
+                      <span class="upload-status-text">正在上传 {uploadState.count} 个文件...</span>
+                    </div>
+                  )}
+                  {uploadState.status === "done" && (
+                    <div class="upload-status-row">
+                      <span class="upload-status-text">上传完成（{uploadState.count} 个文件）</span>
+                    </div>
+                  )}
+                  {uploadState.status === "error" && (
+                    <div class="upload-status-row">
+                      <span class="upload-status-text">上传失败：{uploadState.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </aside>
+
+        {/* Main Content: Chat */}
+        <main class="main-content">
+          <header class="chat-header">
+            <div class="chat-title">对话</div>
+            <div class="icon-btn"><Icons.MoreVert /></div>
+          </header>
+
+          <div class="chat-messages">
+            {messages.length === 0 && (
+               <div class="empty-state">
+                  <div class="empty-icon"><Icons.Sparkles /></div>
+                  <p>开始与您的文档对话</p>
+               </div>
+            )}
+            {messages.map((message, index) => {
+              // 判断是否是连续工具调用中的第一个（前一个消息不是 tool）
+              const prevMessage = index > 0 ? messages[index - 1] : null;
+              const isFirstToolInSequence = message.role === "tool" && (!prevMessage || prevMessage.role !== "tool");
+              
+              return (
+              <div key={message.id} class={`message-row ${message.role}`}>
+                {message.role === "tool" ? (
+                  <div class="assistant-row">
+                    <div class={`assistant-avatar-col ${!isFirstToolInSequence ? 'avatar-hidden' : ''}`}>
+                      {isFirstToolInSequence && (
+                        <div class="assistant-avatar">
+                          <Icons.NotebookLogo />
+                        </div>
+                      )}
+                    </div>
+                    <div class="tool-wrapper">
+                      <ToolMessage
+                        toolName={message.toolName}
+                        status={message.status}
+                        args={message.args}
+                        output={message.output}
+                      />
+                    </div>
+                  </div>
+                ) : message.role === "assistant" ? (
+                  <div class="assistant-row">
+                    <div class="assistant-avatar-col">
+                      <div class="assistant-avatar">
+                        <Icons.NotebookLogo />
+                      </div>
+                    </div>
+                    <div class="message-container assistant">
+                      <div class={`message-bubble ${message.role}`}>
+                        <div class="message-content">
+                          <AssistantContent
+                            text={message.content}
+                            isPending={!!message.isPending}
+                            references={message.references}
+                            onOpenRef={(idx) => openRefModal(message.references, idx)}
+                          />
+                        </div>
+                      </div>
+                      <div class="message-actions">
+                        <button class="action-btn"><Icons.Copy /></button>
+                        <button class="action-btn"><Icons.ThumbUp /></button>
+                        <button class="action-btn"><Icons.ThumbDown /></button>
+                      </div>
+                      {message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
+                        <div class="suggested-questions">
+                          {message.suggestedQuestions.map((q, idx) => (
+                            <button
+                              key={idx}
+                              class="suggested-question-btn"
+                              type="button"
+                              onClick={() => {
+                                setInput(q);
+                                setTimeout(() => sendMessage(), 100);
+                              }}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div class={`message-container ${message.role}`}>
+                     {message.role === "user" && message.timestamp && (
+                        <div class="message-meta-row">
+                          <div class="message-meta">今天 • {message.timestamp}</div>
+                        </div>
+                     )}
+                     <div class={`message-bubble ${message.role}`}>
+                        {(
+                          <div class="message-content">
+                            {message.content}
+                            {!!message.attachments?.length && (
+                              <div class="message-attachments">
+                                <div class="message-attachments-header">已附带来源</div>
+                                <div class="message-attachments-chips">
+                                  {(message.attachments.filter(Boolean) as AttachmentMeta[]).slice(0, 8).map((p) => {
+                                    const mongoId = typeof p === "string" ? p : (p.mongo_id || "");
+                                    const filename = typeof p === "string" ? "" : (p.filename || "");
+                                    const title = filename || mongoId;
+                                    const label = (filename || mongoId).split("/").pop();
+                                    return (
+                                      <span
+                                        key={mongoId || filename || JSON.stringify(p)}
+                                        class="attachment-chip"
+                                        title={title}
+                                      >
+                                        {label}
+                                      </span>
+                                    );
+                                  })}
+                                  {message.attachments.length > 8 && (
+                                    <span class="attachment-chip">+{message.attachments.length - 8}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                     </div>
+                  </div>
+                )}
+              </div>
+            );
+            })}
+            {(() => {
+              const hasRunningTool = messages.some(
+                (m) => m.role === "tool" && m.status === "running",
+              );
+              const shouldShowThinking = status === "思考中..." && !hasRunningTool;
+              if (!shouldShowThinking) return null;
+              return (
+                <div class="message-row assistant">
+                  <div class="assistant-row">
+                    <div class="assistant-avatar-col">
+                      <div class="assistant-avatar">
+                        <Icons.NotebookLogo />
+                      </div>
+                    </div>
+                    <div class="message-container assistant">
+                      <div class="message-bubble assistant">
+                        <div class="message-content">
+                          <div class="assistant-thinking">
+                            <span class="dot" />
+                            <span class="dot" />
+                            <span class="dot" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div class="input-area">
+            <div class="input-wrapper">
+              <textarea
+                rows={1}
+                placeholder="用 DeepAgents 创造无限可能"
+                value={input}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = 'auto';
+                  target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+                  setInput(target.value);
+                }}
+                onKeyDown={handleKeyDown}
+              />
+              <div class="input-footer">
+                <div class="input-actions-left">
+                  <button type="button" class="input-action-btn" title="添加">
+                    <Icons.Plus />
+                  </button>
+                  <button type="button" class="input-action-btn" title="提及">
+                    <Icons.User />
+                  </button>
+                </div>
+                <div class="input-actions-right">
+                  <button type="button" class="input-action-btn" title="语音">
+                    <Icons.Mic />
+                  </button>
+                  <button class="send-btn" onClick={sendMessage} disabled={!input.trim()}>
+                    <Icons.Send />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>
+          </div>
+        </main>
+
+        {/* Right Sidebar: Agents/Studio */}
+        <aside class="sidebar right-sidebar">
+          {isRightCollapsed ? (
+            <div class="sidebar-rail sidebar-rail-right">
+              <button
+                class="sidebar-collapse-icon-btn"
+                onClick={() => setIsRightCollapsed(false)}
+                aria-label="展开 Studio"
+                type="button"
+              >
+                <Icons.PanelExpandRight />
+              </button>
+            </div>
+          ) : (
+            <div class="sidebar-card studio-card">
+              <div class="sidebar-header">
+                <h2>Studio</h2>
+                <div class="sidebar-header-actions">
+                  <div class="icon-btn"><Icons.MoreVert /></div>
+                  <button
+                    class="sidebar-collapse-icon-btn"
+                    onClick={() => setIsRightCollapsed(true)}
+                    aria-label="折叠 Studio"
+                    type="button"
+                  >
+                    <Icons.PanelCollapseRight />
+                  </button>
+                </div>
+              </div>
+              
+              <div class="agent-grid">
+                <div
+                  class={`agent-card ${selectedAgentId === "podcast" ? "active" : ""}`}
+                  style={{ backgroundColor: "#e1f5fe" }}
+                  onClick={() => {
+                    setSelectedAgentId("podcast");
+                    void startPodcastGeneration();
+                  }}
+                >
+                  <div class="agent-card-content">
+                    <div class="agent-icon"><Icons.Sound /></div>
+                    <div class="agent-name">生成播客</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="agent-edit-icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPodcastConfigOpen(true);
+                    }}
+                    aria-label="播客配置"
+                  >
+                    <Icons.MoreVert />
+                  </button>
+                </div>
+
+                {AGENTS.map(agent => (
+                  <div 
+                    key={agent.id} 
+                    class={`agent-card ${selectedAgentId === agent.id ? "active" : ""}`}
+                    style={{ backgroundColor: agent.color }}
+                    onClick={() => setSelectedAgentId(agent.id)}
+                  >
+                    <div class="agent-card-content">
+                      <div class="agent-icon"><agent.Icon /></div>
+                      <div class="agent-name">{agent.name}</div>
+                    </div>
+                    <div class="agent-edit-icon"><Icons.MoreVert /></div>
+                  </div>
+                ))}
+              </div>
+
+              <div class="saved-notes-section">
+                <div class="section-title">运行历史</div>
+                <div class="note-list">
+                  {podcastRuns.map((r) => (
+                    <div
+                      key={r.run_id}
+                      class="note-item"
+                      onClick={() => void openPodcastRunDetail(r.run_id)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <div class="note-icon"><Icons.Sound /></div>
+                      <div class="note-content">
+                        <div class="note-title">{r.episode_name}</div>
+                        <div class="note-meta">{r.created_at} • {r.status}</div>
+                      </div>
+                      <div class="note-action"><Icons.ChevronRight /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {podcastConfigOpen && (
+        <div class="add-source-backdrop" onClick={() => setPodcastConfigOpen(false)}>
+          <div class="podcast-config-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="add-source-top">
+              <div class="add-source-title">
+                播客配置
+                <div class="add-source-subtitle">生成播客</div>
+              </div>
+              <button class="add-source-close" type="button" onClick={() => setPodcastConfigOpen(false)}>
+                ×
+              </button>
+            </div>
+
+            <div class="podcast-config-body">
+              <div class="podcast-config-row">
+                <div class="ref-section-title">发言人</div>
+                <select
+                  class="podcast-config-select"
+                  value={podcastSelectedSpeaker}
+                  onChange={(e) => setPodcastSelectedSpeaker(e.currentTarget.value)}
+                >
+                  <option value="">请选择</option>
+                  {podcastSpeakerProfiles.map((p) => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div class="podcast-config-row">
+                <div class="ref-section-title">播客标题</div>
+                <input
+                  class="podcast-config-input"
+                  value={podcastEpisodeName}
+                  onInput={(e) => setPodcastEpisodeName((e.target as HTMLInputElement).value)}
+                  placeholder="请输入播客标题"
+                />
+              </div>
+
+              <div class="podcast-config-row">
+                <div class="ref-section-title">补充指令</div>
+                <textarea
+                  class="podcast-config-textarea"
+                  value={podcastBriefingSuffix}
+                  onInput={(e) => setPodcastBriefingSuffix((e.target as HTMLTextAreaElement).value)}
+                  placeholder="可选：补充生成要求"
+                />
+              </div>
+
+              <div class="podcast-config-row" style={{ flex: 1, minHeight: 0 }}>
+                <div class="ref-section-title">数据源</div>
+                <div class="podcast-source-container">
+                  <label class="podcast-source-all">
+                    <input
+                      type="checkbox"
+                      checked={podcastSources.length > 0 && podcastSelectedSourceIds.size === podcastSources.length}
+                      onChange={(e) => setAllPodcastSources((e.target as HTMLInputElement).checked)}
+                    />
+                    <span class="podcast-source-all-text">选择所有来源</span>
+                    <span class="podcast-source-all-meta">
+                      已选 {podcastSelectedSourceIds.size}/{podcastSources.length}
+                    </span>
+                  </label>
+
+                  <div class="podcast-source-list">
+                    {podcastSourcesLoading ? (
+                      <div class="ref-muted" style={{ padding: "8px 2px" }}>加载中...</div>
+                    ) : (
+                      <div class="podcast-source-items">
+                        {podcastSources.map((s) => {
+                          const checked = podcastSelectedSourceIds.has(s.id);
+                          return (
+                            <div
+                              key={s.id}
+                              class={`podcast-source-row ${checked ? "selected" : ""}`}
+                              onClick={() => togglePodcastSource(s.id)}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <div class="podcast-source-left">
+                                <div class="podcast-source-icon"><Icons.Pdf /></div>
+                                <div class="podcast-source-name" title={s.filename}>{s.filename}</div>
+                              </div>
+                              <div class="podcast-source-right" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => togglePodcastSource(s.id)}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div class="podcast-config-actions">
+                <button class="add-source-action" type="button" onClick={() => setPodcastConfigOpen(false)}>
+                  取消
+                </button>
+                <button
+                  class="add-source-action primary"
+                  type="button"
+                  onClick={() => {
+                    setPodcastConfigOpen(false);
+                    void startPodcastGeneration();
+                  }}
+                >
+                  生成播客
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {podcastRunDetailOpen && (
+        <div class="ref-modal-backdrop" onClick={() => setPodcastRunDetailOpen(false)}>
+          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="ref-modal-header">
+              <div class="ref-modal-title">运行历史详情</div>
+              <button class="ref-modal-close" onClick={() => setPodcastRunDetailOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div class="ref-modal-body">
+              {podcastRunDetailLoading ? (
+                <div class="ref-muted">加载中...</div>
+              ) : podcastRunDetail ? (
+                <div>
+                  <div class="ref-source">{podcastRunDetail.run.episode_name}</div>
+                  <div class="ref-muted" style={{ marginTop: 8 }}>
+                    {podcastRunDetail.run.status} • {podcastRunDetail.run.created_at}
+                  </div>
+                  {podcastRunDetail.run.message && (
+                    <div class="ref-muted" style={{ marginTop: 8 }}>{podcastRunDetail.run.message}</div>
+                  )}
+                  <div class="ref-divider" />
+                  <div class="ref-section-title">音频</div>
+                  {podcastRunDetail.result?.audio_file_path ? (
+                    <div style={{ marginTop: 8 }}>
+                      <audio
+                        controls
+                        preload="none"
+                        src={`/api/podcast/runs/${encodeURIComponent(podcastRunDetail.run.run_id)}/audio`}
+                        style={{ width: "100%" }}
+                      />
+                      <div class="ref-muted" style={{ marginTop: 8 }}>
+                        <a
+                          href={`/api/podcast/runs/${encodeURIComponent(podcastRunDetail.run.run_id)}/audio`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          下载音频
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div class="ref-muted">暂无音频（可能仍在生成中）</div>
+                  )}
+                  <div class="ref-divider" />
+                  <div class="ref-section-title">对话内容</div>
+                  {podcastRunDetail.result ? (
+                    (() => {
+                      const items = extractPodcastTranscript(podcastRunDetail.result.transcript);
+                      if (!items.length) {
+                        return <div class="ref-muted">暂无对话内容</div>;
+                      }
+                      return (
+                        <div class="podcast-transcript">
+                          {items.map((it, idx) => (
+                            <div key={`${idx}-${it.speaker}`} class="podcast-transcript-item">
+                              <div class="podcast-transcript-speaker" title={it.speaker || ""}>
+                                {it.speaker}
+                              </div>
+                              <div class="podcast-transcript-bubble">
+                                {it.dialogue}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div class="ref-muted">暂无结果（可能仍在生成中）</div>
+                  )}
+
+                  {podcastRunDetail.result && (
+                    <div style={{ marginTop: 12 }}>
+                      <details>
+                        <summary style={{ cursor: "pointer" }}>原始 JSON</summary>
+                        <pre class="ref-file" style={{ marginTop: 8 }}>
+                          {JSON.stringify(podcastRunDetail.result, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div class="ref-muted">暂无详情</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {refModalOpen && (
+        <div class="ref-modal-backdrop" onClick={() => setRefModalOpen(false)}>
+          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="ref-modal-header">
+              <div class="ref-modal-title">
+                引用 [{refModalIndex}]
+              </div>
+              <button class="ref-modal-close" onClick={() => setRefModalOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div class="ref-modal-body">
+              {(() => {
+                const r = (refModalRefs || []).find((x) => x.index === refModalIndex);
+                if (!r) {
+                  return <div class="ref-muted">没有找到引用内容</div>;
+                }
+                return (
+                  <div>
+                    <div class="ref-source">{r.source ? r.source.split("/").pop() : "unknown"}</div>
+                    {r.text && <pre class="ref-snippet">{r.text}</pre>}
+                    <div class="ref-divider" />
+                    <div class="ref-section-title">原文片段</div>
+                    {refModalFileLoading ? (
+                      <div class="ref-muted">加载中...</div>
+                    ) : (
+                      <pre class="ref-file">{refModalFileContent || ""}</pre>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <input
+        ref={directoryInputRef}
+        type="file"
+        style={{ display: "none" }}
+        multiple
+        accept=".txt,.md,.markdown,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.json,.yaml,.yml"
+        onChange={onDirectoryChosen}
+      />
+
+      {addSourceOpen && (
+        <div class="add-source-backdrop" onClick={closeAddSource}>
+          <div class="add-source-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="add-source-top">
+              <div class="add-source-title">
+                根据以下内容生成音频概览和视频概览
+                <div class="add-source-subtitle">您的笔记</div>
+              </div>
+              <button class="add-source-close" type="button" onClick={closeAddSource}>
+                ×
+              </button>
+            </div>
+
+            <div class="add-source-search">
+              <div class="add-source-search-box">
+                <div class="add-source-search-row">
+                  <div class="add-source-search-icon">
+                    <Icons.Search />
+                  </div>
+                  <input
+                    class="add-source-search-input"
+                    placeholder="在网络中搜索新来源"
+                    value={urlDraft}
+                    onInput={(e) => {
+                      setUrlDraft((e.target as HTMLInputElement).value);
+                      if (urlParseState.status !== "idle") {
+                        setUrlParseState({ status: "idle" });
+                      }
+                    }}
+                  />
+                </div>
+
+                <div class="add-source-search-controls">
+                  <button
+                    class={`add-source-chip ${urlMode === "crawl" ? "active" : ""}`}
+                    type="button"
+                    aria-pressed={urlMode === "crawl"}
+                    onClick={() => setUrlMode("crawl")}
+                  >
+                    <span class="chip-icon"><Icons.Globe /></span>
+                    <span class="chip-text">Web</span>
+                    <span class="chip-caret"><Icons.ChevronDown /></span>
+                  </button>
+                  <button
+                    class={`add-source-chip ${urlMode === "llm_summary" ? "active" : ""}`}
+                    type="button"
+                    aria-pressed={urlMode === "llm_summary"}
+                    onClick={() => setUrlMode("llm_summary")}
+                  >
+                    <span class="chip-icon"><Icons.Bolt /></span>
+                    <span class="chip-text">Fast Research</span>
+                    <span class="chip-caret"><Icons.ChevronDown /></span>
+                  </button>
+                </div>
+
+                <button class="add-source-go" type="button" onClick={parseUrlToPreview}>
+                  <Icons.ArrowRight />
+                </button>
+              </div>
+
+              {urlParseState.status === "parsing" && (
+                <div class="add-source-selected">正在解析...</div>
+              )}
+              {urlParseState.status === "error" && (
+                <div class="add-source-selected">解析失败：{urlParseState.message}</div>
+              )}
+              {urlParseState.status === "ready" && (
+                <div style={{ marginTop: 12 }}>
+                  <div class="ref-section-title">解析预览</div>
+                  <pre class="ref-file" style={{ maxHeight: 240, overflow: "auto" }}>{urlParseState.content}</pre>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                    <button class="add-source-action primary" type="button" onClick={uploadParsedUrl}>
+                      上传
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div class="add-source-drop">
+              <div class="add-source-drop-title">或将文件拖至此处</div>
+              <div class="add-source-actions">
+                <button class="add-source-action" type="button" onClick={chooseUploadFiles}>
+                  <span class="chip-icon"><Icons.Upload /></span>
+                  上传文件
+                </button>
+                <button class="add-source-action" type="button">
+                  <span class="chip-icon"><Icons.Link /></span>
+                  网站
+                </button>
+                <button class="add-source-action" type="button">
+                  <span class="chip-icon"><Icons.Drive /></span>
+                  云端硬盘
+                </button>
+                <button class="add-source-action" type="button">
+                  <span class="chip-icon"><Icons.Copy /></span>
+                  复制的文字
+                </button>
+              </div>
+
+              {pendingUploadFiles.length > 0 ? (
+                <div class="add-source-selected">
+                  已选择 {pendingUploadFiles.length} 个文件。
+                  <span style={{ marginLeft: 8 }}>
+                    <button
+                      class="add-source-action primary"
+                      type="button"
+                      onClick={uploadPendingFiles}
+                      disabled={uploadState.status === "uploading"}
+                    >
+                      上传
+                    </button>
+                  </span>
+                </div>
+              ) : (
+                <div class="add-source-selected muted">未选择文件</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sourceDetailOpen && (
+        <div class="ref-modal-backdrop" onClick={() => setSourceDetailOpen(false)}>
+          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="ref-modal-header">
+              <div class="ref-modal-title">来源详情</div>
+              <button class="ref-modal-close" onClick={() => setSourceDetailOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div class="ref-modal-body">
+              {sourceDetailLoading ? (
+                <div class="ref-muted">加载中...</div>
+              ) : sourceDetail ? (
+                <div>
+                  <div class="ref-source">{sourceDetail.filename}</div>
+                  <div class="ref-muted" style={{ marginTop: 8 }}>
+                    {sourceDetail.rel_path || sourceDetail.filename}
+                  </div>
+                  <div class="ref-divider" />
+                  <div class="ref-section-title">内容预览</div>
+                  <pre class="ref-file">{sourceDetail.content_preview || "(二进制文件或暂无可预览文本)"}</pre>
+                </div>
+              ) : (
+                <div class="ref-muted">暂无详情</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantContent({
+  text,
+  isPending,
+  references,
+  onOpenRef,
+}: {
+  text: string;
+  isPending: boolean;
+  references?: RagReference[];
+  onOpenRef: (idx: number) => void;
+}) {
+  if (isPending && !text) {
+    return (
+      <div class="assistant-thinking">
+        <span class="dot" />
+        <span class="dot" />
+        <span class="dot" />
+      </div>
+    );
+  }
+
+  const urlStartIndex = maxRefIndex(references) + 1;
+  const extracted = extractUrlReferences(text, urlStartIndex);
+  const urlRefs = extracted.urlRefs;
+  const processedText = extracted.text;
+
+  const renderInline = (value: string) => {
+    const nodes: Array<ComponentChild> = [];
+    // Regular expression for references [n], bold **text**, and italic *text*
+    const re = /(\[(\d+)\])|(\*\*(.*?)\*\*)|(\*(.*?)\*)/g;
+    let lastIdx = 0;
+    let mm: RegExpExecArray | null;
+
+    while ((mm = re.exec(value)) !== null) {
+      const start = mm.index;
+      const end = start + mm[0].length;
+      
+      if (start > lastIdx) {
+        nodes.push(value.slice(lastIdx, start));
+      }
+
+      if (mm[1]) { // Reference [n]
+        const idx = Number(mm[2]);
+        const ragExists = (references || []).some((r) => r.index === idx);
+        const urlRef = urlRefs.find((r) => r.index === idx);
+        if (ragExists) {
+          nodes.push(
+            <button
+              key={`${start}-${idx}`}
+              type="button"
+              class="ref-chip"
+              onClick={() => onOpenRef(idx)}
+              title="查看引用"
+            >
+              [{idx}]
+            </button>,
+          );
+        } else if (urlRef) {
+          const iconUrl = getFaviconUrl(urlRef.url);
+          nodes.push(
+            <a
+              key={`${start}-${idx}`}
+              class="ref-chip ref-link"
+              href={urlRef.url}
+              target="_blank"
+              rel="noreferrer"
+              title={urlRef.url}
+            >
+              {iconUrl ? <img class="ref-favicon" src={iconUrl} alt="" loading="lazy" /> : null}
+              [{idx}]
+            </a>,
+          );
+        } else {
+          nodes.push(
+            <button
+              key={`${start}-${idx}`}
+              type="button"
+              class="ref-chip disabled"
+              title="暂无引用内容"
+              disabled
+            >
+              [{idx}]
+            </button>,
+          );
+        }
+      } else if (mm[3]) { // Bold **text**
+        nodes.push(<strong class="md-bold">{mm[4]}</strong>);
+      } else if (mm[5]) { // Italic *text*
+        nodes.push(<em class="md-italic">{mm[6]}</em>);
+      }
+
+      lastIdx = end;
+    }
+
+    if (lastIdx < value.length) {
+      nodes.push(value.slice(lastIdx));
+    }
+    return nodes;
+  };
+
+  const renderMarkdownBlocks = (src: string) => {
+    const lines = src.replace(/\r\n/g, "\n").split("\n");
+    const blocks: ComponentChild[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+      
+      // Code Blocks
+      if (line.trim().startsWith("```")) {
+        const lang = line.trim().slice(3).trim();
+        i += 1;
+        const codeLines: string[] = [];
+        while (i < lines.length && !lines[i].trim().startsWith("```")) {
+          codeLines.push(lines[i]);
+          i += 1;
+        }
+        i += 1;
+        blocks.push(
+          <div class="md-code-block">
+            {lang && <div class="md-code-lang">{lang}</div>}
+            <pre class="md-code" data-lang={lang || undefined}>
+              <code>{codeLines.join("\n")}</code>
+            </pre>
+          </div>
+        );
+        continue;
+      }
+
+      // Headings
+      const heading = /^\s{0,3}(#{1,6})\s+(.*)$/.exec(line);
+      if (heading) {
+        const level = heading[1].length;
+        const content = heading[2] || "";
+        const Tag = (`h${Math.min(level, 6)}` as unknown) as any;
+        blocks.push(<Tag class={`md-heading h${level}`}>{renderInline(content)}</Tag>);
+        i += 1;
+        continue;
+      }
+
+      // Tables
+      if (line.trim().startsWith("|") && i + 1 < lines.length && lines[i+1].trim().includes("|---")) {
+        const rows: string[][] = [];
+        // Header
+        rows.push(line.split("|").filter(s => s.trim()).map(s => s.trim()));
+        i += 2; // Skip header and separator
+        // Rows
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          rows.push(lines[i].split("|").filter(s => s.trim()).map(s => s.trim()));
+          i += 1;
+        }
+        blocks.push(
+          <div class="md-table-wrapper">
+            <table class="md-table">
+              <thead>
+                <tr>{rows[0].map(cell => <th>{renderInline(cell)}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.slice(1).map(row => (
+                  <tr>{row.map(cell => <td>{renderInline(cell)}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+
+      // Bullet Lists
+      const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+      if (bullet) {
+        const items: ComponentChild[] = [];
+        while (i < lines.length) {
+          const m = /^\s*[-*]\s+(.*)$/.exec(lines[i]);
+          if (!m) break;
+          items.push(<li>{renderInline(m[1] || "")}</li>);
+          i += 1;
+        }
+        blocks.push(<ul class="md-ul">{items}</ul>);
+        continue;
+      }
+
+      // Numbered Lists
+      const numbered = /^\s*(\d+)\.\s+(.*)$/.exec(line);
+      if (numbered) {
+        const items: ComponentChild[] = [];
+        while (i < lines.length) {
+          const m = /^\s*(\d+)\.\s+(.*)$/.exec(lines[i]);
+          if (!m) break;
+          items.push(<li>{renderInline(m[2] || "")}</li>);
+          i += 1;
+        }
+        blocks.push(<ol class="md-ol">{items}</ol>);
+        continue;
+      }
+
+      // Empty Lines
+      if (!line.trim()) {
+        i += 1;
+        continue;
+      }
+
+      // Paragraphs
+      const paraLines: string[] = [line];
+      i += 1;
+      while (i < lines.length && lines[i].trim() && 
+             !lines[i].trim().startsWith("```") && 
+             !/^\s{0,3}#{1,6}\s+/.test(lines[i]) && 
+             !/^\s*[-*]\s+/.test(lines[i]) &&
+             !/^\s*\d+\.\s+/.test(lines[i]) &&
+             !lines[i].trim().startsWith("|")) {
+        paraLines.push(lines[i]);
+        i += 1;
+      }
+      blocks.push(<p class="md-p">{renderInline(paraLines.join("\n"))}</p>);
+    }
+
+    return blocks;
+  };
+
+  return <div class="md-root">{renderMarkdownBlocks(processedText)}</div>;
+}
+
+// Collapsible Tool Message Component
+function ToolMessage({
+  toolName,
+  status,
+  args,
+  output,
+}: {
+  toolName: string;
+  status?: string;
+  args?: unknown;
+  output?: unknown;
+}) {
+  const [isOpen, setIsOpen] = useState(status === "running");
+
+  // Debug: 输出完整的 props 信息
+  console.log('ToolMessage props:', { toolName, status, args, output });
+
+  const title =
+    status === "running"
+      ? `正在执行: ${toolName}`
+      : status === "error"
+        ? `执行失败: ${toolName}`
+        : `已完成: ${toolName}`;
+
+  const renderContent = () => {
+    let data = status === "running" ? args : output;
+    if (!data) return null;
+
+    // 尝试解析 JSON 字符串
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch (e) {
+        // 如果不是 JSON，保持原样
+      }
+    }
+
+    console.log('ToolMessage renderContent:', { toolName, status, hasArgs: !!args, hasOutput: !!output, dataType: typeof data, parsedData: data });
+
+    // Web Search Results Rendering
+    if (toolName === "web_search" && typeof data === "object") {
+      const results = (data as any).results || [];
+      if (results.length > 0) {
+        return (
+          <div class="tool-results-list">
+            {results.map((r: any, idx: number) => {
+              // 提取域名
+              let domain = '';
+              try {
+                const urlObj = new URL(r.url);
+                domain = urlObj.hostname.replace('www.', '');
+              } catch (e) {
+                domain = r.url;
+              }
+              
+              // 评分可视化（0-1 转换为百分比）
+              const scorePercent = Math.round((r.score || 0) * 100);
+              const scoreColor = scorePercent >= 80 ? '#4caf50' : scorePercent >= 60 ? '#ff9800' : '#9e9e9e';
+              
+              return (
+                <div key={idx} class="tool-result-item">
+                  <div class="result-header">
+                    <div class="result-title-row">
+                      <Icons.Globe />
+                      <span class="result-title-text">{r.title}</span>
+                    </div>
+                    {r.score !== undefined && (
+                      <div class="result-score">
+                        <span class="score-value">{scorePercent}%</span>
+                      </div>
+                    )}
+                  </div>
+                  <div class="result-content">{r.content}</div>
+                  <div class="result-meta">
+                    <a href={r.url} target="_blank" rel="noreferrer" class="result-link">
+                      <Icons.Link />
+                      <span>{domain}</span>
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+    }
+
+    // RAG Query Results Rendering
+    if (toolName === "rag_query" && Array.isArray(data)) {
+      return (
+        <div class="tool-results-list">
+          {data.map((r: any, idx: number) => {
+            // 评分可视化（0-1 转换为百分比）
+            const score = r.score || 0;
+            const scorePercent = Math.round(score * 100);
+            const scoreColor = scorePercent >= 80 ? '#4caf50' : scorePercent >= 60 ? '#ff9800' : '#f44336';
+            const relevanceLabel = scorePercent >= 80 ? '高相关' : scorePercent >= 60 ? '中相关' : '低相关';
+            
+            return (
+              <div key={idx} class="tool-result-item rag-result-item">
+                <div class="result-header">
+                  <div class="rag-index">
+                    <Icons.Search />
+                    <span>片段 {r.index || idx + 1}</span>
+                  </div>
+                  <div class="rag-relevance" style={{ color: scoreColor }}>
+                    <span class="relevance-label">{relevanceLabel}</span>
+                    <span class="score-value">{scorePercent}%</span>
+                  </div>
+                </div>
+                <div class="rag-score-bar">
+                  <div class="score-bar-fill" style={{ width: `${scorePercent}%`, backgroundColor: scoreColor }}></div>
+                </div>
+                <div class="result-content rag-content">{r.text}</div>
+                <div class="result-meta rag-source">
+                  <Icons.Pdf />
+                  <span>{r.source || '未知来源'}</span>
+                  {r.mongo_id && <span class="mongo-id">ID: {r.mongo_id.substring(0, 8)}...</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // Shell Command Rendering
+    if (toolName === "shell" || toolName === "bash") {
+      const cmd = (args as any)?.command || (args as any)?.cmd || "";
+      const out = typeof data === "string" ? data : formatJson(data);
+      return (
+        <div class="tool-shell-box">
+          <div class="tool-shell-cmd">
+            <span class="shell-prompt">$</span> {cmd}
+          </div>
+          {status === "done" && out && (
+            <pre class="tool-shell-out">{out}</pre>
+          )}
+        </div>
+      );
+    }
+
+    // File Operation Rendering
+    if (["read_file", "write_file", "edit_file", "write_to_file", "edit", "replace_file_content"].includes(toolName)) {
+      const path = (args as any)?.file_path || (args as any)?.path || (args as any)?.TargetFile || "";
+      const isReadOp = toolName.includes("read");
+      const isWriteOp = toolName.includes("write") || toolName === "write_to_file";
+      const isEditOp = toolName.includes("edit") || toolName.includes("replace");
+      
+      // 从 output 字符串中提取文件路径（如果 path 为空）
+      let displayPath = path;
+      if (!displayPath && typeof output === 'string') {
+        const pathMatch = output.match(/\/[\w\/\-\.]+\.(md|py|js|ts|tsx|json|txt|css)/i);
+        if (pathMatch) {
+          displayPath = pathMatch[0];
+        }
+      }
+      
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Pdf /> 
+            <span class="tool-file-path">{displayPath || '未知文件'}</span>
+            {isReadOp && <span class="file-op-badge read-badge">读取</span>}
+            {isWriteOp && <span class="file-op-badge write-badge">写入</span>}
+            {isEditOp && <span class="file-op-badge edit-badge">编辑</span>}
+          </div>
+          
+          {/* read_file: 显示带行号的内容 */}
+          {isReadOp && typeof data === "string" && (
+            <div class="file-read-container">
+              <div class="file-stats">
+                <span>行数: {data.split('\n').length}</span>
+                <span>字符: {data.length}</span>
+              </div>
+              <pre class="tool-file-content with-line-numbers">
+                {data.split('\n').slice(0, 100).map((line, idx) => (
+                  <div key={idx} class="code-line">
+                    <span class="line-number">{idx + 1}</span>
+                    <span class="line-content">{line}</span>
+                  </div>
+                ))}
+                {data.split('\n').length > 100 && (
+                  <div class="code-line-more">… 还有 {data.split('\n').length - 100} 行</div>
+                )}
+              </pre>
+            </div>
+          )}
+          
+          {/* write_file/edit_file: 显示修改摘要 */}
+          {!isReadOp && (
+            <div class="file-write-summary">
+              <div class="summary-item success">
+                <Icons.Logo />
+                <span>操作成功</span>
+              </div>
+              {(args as any)?.CodeContent && (
+                <div class="summary-item">
+                  <span>新增内容: {((args as any).CodeContent as string).split('\n').length} 行</span>
+                </div>
+              )}
+              {(args as any)?.Instruction && (
+                <div class="summary-item instruction">
+                  <Icons.Tool />
+                  <span>{(args as any).Instruction}</span>
+                </div>
+              )}
+              {(args as any)?.ReplacementChunks && (
+                <div class="summary-item">
+                  <span>修改块数: {((args as any).ReplacementChunks as any[]).length}</span>
+                </div>
+              )}
+              {typeof output === 'string' && output.includes('Updated') && (
+                <div class="summary-item">
+                  <span>{output}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Directory Listing Rendering
+    if (toolName === "ls" || toolName === "list_dir") {
+      const path = (args as any)?.DirectoryPath || (args as any)?.path || "";
+      let items: string[] = [];
+      if (typeof data === "string") {
+        items = data.split("\n").filter(Boolean);
+      } else if (Array.isArray(data)) {
+        items = data.map(i => typeof i === "string" ? i : (i.name || formatJson(i)));
+      }
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Folder /> <span class="tool-file-path">{path || "当前目录"}</span>
+          </div>
+          {status === "done" && (
+            <div class="tool-ls-grid">
+              {items.map((item, idx) => (
+                <div key={idx} class="tool-ls-item">
+                  {item.includes("/") || !item.includes(".") ? <Icons.Folder /> : <Icons.Pdf />}
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Search/Grep Rendering
+    if (toolName === "grep" || toolName === "grep_search" || toolName === "glob") {
+      const query = (args as any)?.Query || (args as any)?.Pattern || "";
+      const path = (args as any)?.SearchPath || (args as any)?.SearchDirectory || "";
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Search /> <span class="tool-file-path">{path || "搜索结果"}: {query}</span>
+          </div>
+          {status === "done" && (
+            <pre class="tool-file-content">{typeof data === "string" ? data : formatJson(data)}</pre>
+          )}
+        </div>
+      );
+    }
+
+    // Subagent Task Rendering
+    if (toolName === "task") {
+      const desc = (args as any)?.description || "";
+      const name = (args as any)?.name || "";
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Bolt /> <span class="tool-file-path">分派子任务: {name || desc}</span>
+          </div>
+          <div class="tool-fetch-body">
+            <div class="tool-fetch-title">任务描述</div>
+            <div class="tool-fetch-content">{desc}</div>
+            {status === "done" && (
+              <>
+                <div class="tool-fetch-title" style={{marginTop: '8px'}}>执行结果</div>
+                <div class="tool-fetch-content">{typeof data === "string" ? data : formatJson(data)}</div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // HTTP Request Rendering
+    if (toolName === "http_request") {
+      const url = (args as any)?.url || "";
+      const method = (args as any)?.method || "GET";
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Globe /> <span class="tool-file-path">[{method}] {url}</span>
+          </div>
+          {status === "done" && (
+            <div class="tool-fetch-body">
+              <div class="tool-fetch-title">响应状态</div>
+              <div class="tool-fetch-content">{formatJson(data)}</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Fetch URL Rendering
+    if (toolName === "fetch_url") {
+      const url = (args as any)?.url || "";
+      const title = (data as any)?.title || "";
+      const content = (data as any)?.markdown_content || (data as any)?.markdown || (data as any)?.content || "";
+      return (
+        <div class="tool-file-box">
+          <div class="tool-file-header">
+            <Icons.Link /> <span class="tool-file-path">{url}</span>
+          </div>
+          {status === "done" && (
+            <div class="tool-fetch-body">
+              {title && <div class="tool-fetch-title">{title}</div>}
+              <div class="tool-fetch-content">{content}</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Write Todos Rendering (AnyGen style)
+    if (toolName === "write_todos") {
+      // 尝试从多个可能的位置提取 todos 数据
+      let todos = [];
+      
+      // 优先从 args 中获取（工具调用时）
+      if (args && (args as any).todos) {
+        todos = (args as any).todos;
+      }
+      // 其次从 output 中获取（工具执行完成后）
+      else if (output && typeof output === 'string') {
+        try {
+          // 处理 "Updated todo list to [...]" 格式
+          let jsonStr = output;
+          
+          // 提取方括号内的内容
+          const match = output.match(/\[.*\]/);
+          if (match) {
+            jsonStr = match[0];
+          }
+          
+          // 将 Python 风格的单引号替换为双引号
+          jsonStr = jsonStr.replace(/'/g, '"');
+          
+          const parsed = JSON.parse(jsonStr);
+          if (Array.isArray(parsed)) {
+            todos = parsed;
+          } else if (parsed.todos) {
+            todos = parsed.todos;
+          }
+        } catch (e) {
+          console.error('Failed to parse write_todos output:', e, output);
+        }
+      }
+      else if (output && (output as any).todos) {
+        todos = (output as any).todos;
+      }
+      else if (data && (data as any).todos) {
+        todos = (data as any).todos;
+      }
+      
+      console.log('write_todos debug:', { toolName, status, args, output, data, todos });
+      
+      if (Array.isArray(todos) && todos.length > 0) {
+        return (
+          <div class="tool-todos-container">
+            <div class="tool-todos-header">
+              <Icons.Apps />
+              <span class="tool-todos-title">任务列表</span>
+              <span class="tool-todos-count">{todos.length} 项</span>
+            </div>
+            <div class="tool-todos-list">
+              {todos.map((todo: any, idx: number) => {
+                const todoStatus = todo.status || "pending";
+                const todoPriority = todo.priority || "medium";
+                const todoContent = todo.content || todo.task || "";
+                
+                return (
+                  <div key={idx} class={`tool-todo-item tool-todo-${todoStatus}`}>
+                    <div class="tool-todo-checkbox">
+                      {todoStatus === "completed" && (
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                        </svg>
+                      )}
+                      {todoStatus === "in_progress" && (
+                        <div class="tool-todo-spinner"></div>
+                      )}
+                      {todoStatus === "pending" && (
+                        <div class="tool-todo-circle"></div>
+                      )}
+                    </div>
+                    <div class="tool-todo-content">
+                      <span class={todoStatus === "completed" ? "tool-todo-text-completed" : ""}>
+                        {todoContent}
+                      </span>
+                      {todoPriority === "high" && (
+                        <span class="tool-todo-priority-high">高优先级</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // Default JSON rendering
+    return <pre class="tool-json-output">{formatJson(data)}</pre>;
+  };
+
+  // 生成工具描述文本
+  const getToolDescription = () => {
+    if (toolName === 'write_todos') return '任务列表';
+    if (toolName === 'web_search') {
+      const query = (args as any)?.query || '';
+      return query ? `搜索: ${query}` : '网络搜索';
+    }
+    if (toolName === 'rag_query') {
+      const query = (args as any)?.query || '';
+      return query ? `检索: ${query}` : '知识检索';
+    }
+    if (toolName === 'read_file') {
+      const path = (args as any)?.file_path || '';
+      const filename = path.split('/').pop() || '文件';
+      return `读取: ${filename}`;
+    }
+    if (toolName === 'write_file' || toolName === 'write_to_file') {
+      const path = (args as any)?.TargetFile || (args as any)?.file_path || '';
+      const filename = path.split('/').pop() || '文件';
+      return `写入: ${filename}`;
+    }
+    if (toolName === 'edit_file' || toolName === 'replace_file_content') {
+      const path = (args as any)?.TargetFile || (args as any)?.file_path || '';
+      const filename = path.split('/').pop() || '文件';
+      return `编辑: ${filename}`;
+    }
+    return toolName;
+  };
+
+  const containerClass = `tool-container ${status === "running" ? "tool-running" : status === "error" ? "tool-error" : "tool-done"}`;
+
+  return (
+    <div class={containerClass}>
+      <div class="tool-header" onClick={() => setIsOpen(!isOpen)}>
+        <div class="tool-info">
+          <span class="tool-dot" />
+          <span class="tool-name">{getToolDescription()}</span>
+        </div>
+        <span class="chevron">{isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
+      </div>
+      {isOpen && <div class="tool-body">{renderContent()}</div>}
+    </div>
+  );
+}
+
+// Flat File List Component (Recursively flattens tree)
+function FileTreeFlat({ node, onSelect, selected }: { node: TreeNode; onSelect: (path: string) => void; selected: Set<string> }) {
+  const flatten = (n: TreeNode): TreeNode[] => {
+     if (n.type === "file") return [n];
+     if (n.type === "dir" && n.children) {
+        return n.children.flatMap(flatten);
+     }
+     return [];
+  };
+
+  const files = useMemo(() => flatten(node), [node]);
+
+  return (
+    <div class="file-list">
+      {files.map(file => (
+        <div key={file.path} class="file-item" onClick={() => onSelect(file.path)}>
+           <div class="file-icon"><Icons.Pdf /></div> 
+           <div class="file-name">{file.name}</div>
+           <div class="checkbox-wrapper">
+              <input type="checkbox" checked={selected.has(file.path)} readOnly />
+           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export { App };
+
+export default App;
