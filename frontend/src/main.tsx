@@ -1,6 +1,6 @@
 import { render } from "preact";
 import { App } from "./ui/App";
-import "./ui/styles.css";
+import "./ui/styles/styles.css";
 
 const root = document.getElementById("root");
 

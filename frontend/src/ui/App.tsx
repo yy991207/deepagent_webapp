@@ -1,203 +1,33 @@
 import type { ComponentChild } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
-// --- Types ---
+import type {
+  TreeNode,
+  UploadedSource,
+  UploadedSourceDetail,
+  PodcastSpeakerProfile,
+  PodcastRunSummary,
+  PodcastRunDetail,
+  RagReference,
+  UrlReference,
+  AttachmentMeta,
+  ChatMessage,
+  AgentLog,
+  SocketPayload,
+} from "./types";
 
-type TreeNode = {
-  name: string;
-  path: string;
-  type: "dir" | "file";
-  children?: TreeNode[];
-};
+import {
+  formatJson,
+  extractPodcastTranscript,
+  maxRefIndex,
+  extractUrlReferences,
+  getFaviconUrl,
+  createId,
+  getOrCreateThreadId,
+} from "./types/utils";
 
-type UploadedSource = {
-  id: string;
-  filename: string;
-  rel_path?: string;
-  size?: number;
-  created_at?: string;
-};
+import { useChat } from "./hooks/useChat";
 
-type UploadedSourceDetail = UploadedSource & {
-  sha256?: string;
-  content_preview?: string | null;
-};
-
-type PodcastSpeakerProfile = {
-  id: string;
-  name: string;
-  description: string;
-  tts_provider: string;
-  tts_model: string;
-  speakers: Array<{ name: string; voice_id: string; backstory: string; personality: string }>;
-};
-
-type PodcastRunSummary = {
-  run_id: string;
-  status: string;
-  episode_profile: string;
-  speaker_profile: string;
-  episode_name: string;
-  created_at: string;
-  updated_at: string;
-  message?: string;
-};
-
-type PodcastRunDetail = {
-  run: PodcastRunSummary;
-  result: null | {
-    run_id: string;
-    episode_profile: string;
-    speaker_profile: string;
-    episode_name: string;
-    audio_file_path: string | null;
-    transcript: unknown;
-    outline: unknown;
-    created_at: string;
-    processing_time?: number;
-  };
-};
-
-type RagReference = {
-  index: number;
-  source?: string;
-  mongo_id?: string;
-  text?: string;
-};
-
-type UrlReference = {
-  index: number;
-  url: string;
-};
-
-type AttachmentMeta =
-  | string
-  | {
-      mongo_id: string;
-      filename?: string;
-    };
-
-type ChatMessage =
-  | {
-      id: string;
-      role: "user" | "assistant";
-      content: string;
-      attachments?: AttachmentMeta[];
-      references?: RagReference[];
-      suggestedQuestions?: string[];
-      isPending?: boolean;
-      timestamp?: string;
-    }
-  | {
-      id: string;
-      role: "tool";
-      toolCallId: string;
-      toolName: string;
-      status: "running" | "done" | "error";
-      args?: unknown;
-      output?: unknown;
-      startedAt?: string;
-      endedAt?: string;
-    };
-
-type AgentLog = {
-  id: string;
-  agentId: string;
-  timestamp: string;
-  message: string;
-  type: "info" | "error" | "tool";
-};
-
-type SocketPayload =
-  | { type: "chat.delta"; text: string }
-  | { type: "tool.start"; id: string; name: string; args: unknown }
-  | { type: "tool.end"; id: string; name: string; status: string; output: unknown }
-  | { type: "rag.references"; references: RagReference[] }
-  | { type: "suggested.questions"; questions: string[] }
-  | { type: "session.status"; status: string }
-  | { type: "error"; message: string };
-
-const formatJson = (value: unknown) => {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-};
-
-type PodcastTranscriptEntry = {
-  speaker?: string;
-  dialogue?: string;
-};
-
-const extractPodcastTranscript = (value: unknown): PodcastTranscriptEntry[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((x) => {
-        if (!x || typeof x !== "object") return null;
-        const anyX = x as Record<string, unknown>;
-        const speaker = typeof anyX.speaker === "string" ? anyX.speaker : "";
-        const dialogue = typeof anyX.dialogue === "string" ? anyX.dialogue : "";
-        if (!speaker || !dialogue) return null;
-        return { speaker, dialogue };
-      })
-      .filter(Boolean) as PodcastTranscriptEntry[];
-  }
-
-  if (value && typeof value === "object" && "transcript" in value) {
-    const anyV = value as Record<string, unknown>;
-    return extractPodcastTranscript(anyV.transcript);
-  }
-
-  return [];
-};
-
-const maxRefIndex = (refs: RagReference[] | undefined) => {
-  if (!refs || refs.length === 0) return 0;
-  let max = 0;
-  for (const r of refs) {
-    if (typeof r.index === "number" && r.index > max) {
-      max = r.index;
-    }
-  }
-  return max;
-};
-
-const extractUrlReferences = (input: string, startIndex: number): { text: string; urlRefs: UrlReference[] } => {
-  const reUrl = /(https?:\/\/[^\s)\]}>,"']+)/g;
-  const found: string[] = [];
-
-  let m: RegExpExecArray | null;
-  while ((m = reUrl.exec(input)) !== null) {
-    found.push(m[1]);
-  }
-
-  const unique: string[] = [];
-  for (const u of found) {
-    if (!unique.includes(u)) {
-      unique.push(u);
-    }
-  }
-
-  const urlRefs: UrlReference[] = unique.map((url, i) => ({ index: startIndex + i, url }));
-  let text = input;
-  for (const r of urlRefs) {
-    text = text.split(r.url).join(`[${r.index}]`);
-  }
-
-  return { text, urlRefs };
-};
-
-const getFaviconUrl = (url: string) => {
-  try {
-    const u = new URL(url);
-    return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(u.hostname)}`;
-  } catch {
-    return "";
-  }
-};
 
 const upsertToolMessage = (
   prev: ChatMessage[],
@@ -312,48 +142,17 @@ const Icons = {
   ThumbDown: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v1.91l.01.01L1 14c0 1.1.9 2 2 2h6.31l.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>,
   MoreVert: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>,
   Drive: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 12l6 10.39h13L15 12H2zm21-1l-6-10.39H4L10 11h13zm-1 1l-6 10.39H2l6-10.39h15z" opacity="0.3"/><path d="M10.23 11.27l-6.12 10.6h12.76l6.12-10.6H10.23zM7.34 9.61l6.12-10.6H.7L6.81 9.61h.53zM15.49 11.27l6.12-10.6H8.89l-6.12 10.6h12.72z"/></svg>,
-  Pdf: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="#e53935"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v2.5zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h2v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>,
-  Sound: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v9.28c-.47-.17-.97-.28-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.16-1.75 4.45-4H15V6h4V3h-7z"/></svg>,
-  MindMap: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 9h-2V7h-2v5H6v2h2v5h2v-5h2v-2z"/></svg>,
-  Video: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>,
-  Quiz: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12zM10 9h8v2h-8zm0 3h4v2h-4zm0-6h8v2h-8z"/></svg>,
-  User: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>,
-  Mic: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>,
+  Sound: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>,
+  MindMap: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>,
+  Video: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>,
+  Quiz: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>,
+  Pdf: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>,
+  User: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>,
+  Mic: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>,
 };
 
-const createId = () => Math.random().toString(36).slice(2, 10);
-
-const getOrCreateThreadId = () => {
-  const key = "deepagents_thread_id";
-  try {
-    const stored = localStorage.getItem(key) || "";
-    const tid = stored || `web-${createId()}`;
-    localStorage.setItem(key, tid);
-    try {
-      sessionStorage.setItem(key, tid);
-    } catch {
-      // ignore
-    }
-    (window as any).__deepagents_thread_id = tid;
-    return tid;
-  } catch {
-    try {
-      const stored = sessionStorage.getItem(key) || "";
-      const tid = stored || `web-${createId()}`;
-      sessionStorage.setItem(key, tid);
-      (window as any).__deepagents_thread_id = tid;
-      return tid;
-    } catch {
-      const tid = `web-${createId()}`;
-      (window as any).__deepagents_thread_id = tid;
-      return tid;
-    }
-  }
-};
-
-// Mock Agents with Colors
 const AGENTS = [
-  { id: "audio", name: "音频概览", Icon: Icons.Sound, color: "#e1f5fe" }, 
+  { id: "audio", name: "音频概览", Icon: Icons.Sound, color: "#e1f5fe" },
   { id: "mindmap", name: "思维导图", Icon: Icons.MindMap, color: "#f3e5f5" },
   { id: "video", name: "视频概览", Icon: Icons.Video, color: "#e8f5e9" },
   { id: "quiz", name: "测验", Icon: Icons.Quiz, color: "#e0f2f1" },
