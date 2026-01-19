@@ -94,35 +94,27 @@ const Icons = {
   ChevronRight: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>,
   ChevronLeft: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l-1.41 1.41L8 12l4.59 4.59L14 18l-6-6z"/></svg>,
   PanelCollapseLeft: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <path d="M9 5v14" />
-      <path d="M14.5 12l-2.5-2.5" stroke-linecap="round" />
-      <path d="M14.5 12l-2.5 2.5" stroke-linecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M14 8l-4 4 4 4" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   ),
   PanelExpandLeft: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <path d="M9 5v14" />
-      <path d="M12 12l2.5-2.5" stroke-linecap="round" />
-      <path d="M12 12l2.5 2.5" stroke-linecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M10 8l4 4-4 4" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   ),
   PanelCollapseRight: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <path d="M15 5v14" />
-      <path d="M9.5 12l2.5-2.5" stroke-linecap="round" />
-      <path d="M9.5 12l2.5 2.5" stroke-linecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M10 8l4 4-4 4" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   ),
   PanelExpandRight: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-      <rect x="4" y="5" width="16" height="14" rx="2" />
-      <path d="M15 5v14" />
-      <path d="M12 12l-2.5-2.5" stroke-linecap="round" />
-      <path d="M12 12l-2.5 2.5" stroke-linecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M14 8l-4 4 4 4" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   ),
   ChevronDown: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>,
@@ -1417,44 +1409,96 @@ function App() {
                 </div>
               </div>
               
-              <div class="agent-grid">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "0 12px 12px" }}>
                 <div
-                  class={`agent-card ${selectedAgentId === "podcast" ? "active" : ""}`}
-                  style={{ backgroundColor: "#e1f5fe" }}
+                  style={{
+                    background: "#d1e7dd",
+                    borderRadius: 12,
+                    padding: "12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    position: "relative",
+                    border: selectedAgentId === "podcast" ? "2px solid #0d6efd" : "none"
+                  }}
                   onClick={() => {
                     setSelectedAgentId("podcast");
                     void startPodcastGeneration();
                   }}
                 >
-                  <div class="agent-card-content">
-                    <div class="agent-icon"><Icons.Sound /></div>
-                    <div class="agent-name">生成播客</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ color: "#198754", display: "flex" }}><Icons.Sound /></div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>生成播客</div>
                   </div>
                   <button
                     type="button"
-                    class="agent-edit-icon"
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      background: "rgba(255,255,255,0.8)",
+                      border: "none",
+                      borderRadius: 6,
+                      width: 24,
+                      height: 24,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      color: "#666"
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       setPodcastConfigOpen(true);
                     }}
                     aria-label="播客配置"
                   >
-                    <Icons.MoreVert />
+                    <Icons.Settings />
                   </button>
                 </div>
 
                 {AGENTS.map(agent => (
                   <div 
-                    key={agent.id} 
-                    class={`agent-card ${selectedAgentId === agent.id ? "active" : ""}`}
-                    style={{ backgroundColor: agent.color }}
+                    key={agent.id}
+                    style={{
+                      background: agent.color,
+                      borderRadius: 12,
+                      padding: "12px",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      position: "relative",
+                      border: selectedAgentId === agent.id ? "2px solid #0d6efd" : "none"
+                    }}
                     onClick={() => setSelectedAgentId(agent.id)}
                   >
-                    <div class="agent-card-content">
-                      <div class="agent-icon"><agent.Icon /></div>
-                      <div class="agent-name">{agent.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ color: "#666", display: "flex" }}><agent.Icon /></div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>{agent.name}</div>
                     </div>
-                    <div class="agent-edit-icon"><Icons.MoreVert /></div>
+                    <button
+                      type="button"
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        background: "rgba(255,255,255,0.8)",
+                        border: "none",
+                        borderRadius: 6,
+                        width: 24,
+                        height: 24,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        color: "#666"
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Icons.Settings />
+                    </button>
                   </div>
                 ))}
               </div>
