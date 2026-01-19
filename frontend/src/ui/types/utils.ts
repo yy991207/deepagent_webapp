@@ -79,6 +79,34 @@ export const getFaviconUrl = (url: string) => {
 
 export const createId = () => Math.random().toString(36).slice(2, 10);
 
+ export const getOrCreateSessionId = () => {
+   const key = "deepagents_session_id";
+   try {
+     const stored = localStorage.getItem(key) || "";
+     const sid = stored || `web-${createId()}`;
+     localStorage.setItem(key, sid);
+     try {
+       sessionStorage.setItem(key, sid);
+     } catch {
+       // ignore
+     }
+     (window as any).__deepagents_session_id = sid;
+     return sid;
+   } catch {
+     try {
+       const stored = sessionStorage.getItem(key) || "";
+       const sid = stored || `web-${createId()}`;
+       sessionStorage.setItem(key, sid);
+       (window as any).__deepagents_session_id = sid;
+       return sid;
+     } catch {
+       const sid = `web-${createId()}`;
+       (window as any).__deepagents_session_id = sid;
+       return sid;
+     }
+   }
+ };
+
 export const getOrCreateThreadId = () => {
   const key = "deepagents_thread_id";
   try {

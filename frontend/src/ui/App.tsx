@@ -14,6 +14,7 @@ import type {
   ChatMessage,
   AgentLog,
   SocketPayload,
+  ChatSession,
 } from "./types";
 
 import {
@@ -23,7 +24,7 @@ import {
   extractUrlReferences,
   getFaviconUrl,
   createId,
-  getOrCreateThreadId,
+  getOrCreateSessionId,
 } from "./types/utils";
 
 import { useChat } from "./hooks/useChat";
@@ -214,7 +215,11 @@ function App() {
   const pendingRefsRef = useRef<RagReference[] | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [threadId, setThreadId] = useState<string>(() => getOrCreateThreadId());
+  const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId());
+
+  const [leftPanelMode, setLeftPanelMode] = useState<"sources" | "sessions">("sources");
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
@@ -242,13 +247,77 @@ function App() {
   useEffect(() => {
     fetchTree();
     void fetchSources();
-    void fetchChatHistory(threadId);
+    void fetchChatHistory(sessionId);
+    void fetchChatSessions();
     void fetchPodcastSpeakerProfiles();
     void fetchPodcastRuns();
     return () => {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  const fetchChatSessions = async () => {
+    const resp = await fetch(`/api/chat/sessions?assistant_id=agent&limit=50`);
+    if (!resp.ok) {
+      setChatSessions([]);
+      return;
+    }
+    const data = (await resp.json()) as { sessions?: ChatSession[] };
+    setChatSessions(Array.isArray(data.sessions) ? data.sessions : []);
+  };
+
+  const createNewSession = async () => {
+    const resp = await fetch("/api/chat/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assistant_id: "agent" }),
+    });
+    if (!resp.ok) {
+      return null;
+    }
+    const data = (await resp.json()) as { session_id?: string };
+    const sid = String(data.session_id || "").trim();
+    return sid || null;
+  };
+
+  const switchSession = async (sid: string) => {
+    const next = String(sid || "").trim();
+    if (!next) return;
+    setSessionId(next);
+    try {
+      localStorage.setItem("deepagents_session_id", next);
+    } catch {
+      // ignore
+    }
+    await fetchChatHistory(next);
+  };
+
+  const requestDeleteSession = (sid: string) => {
+    setDeleteSessionId(sid);
+  };
+
+  const confirmDeleteSession = async () => {
+    const sid = deleteSessionId;
+    if (!sid) return;
+
+    const resp = await fetch(`/api/chat/session/${encodeURIComponent(sid)}?assistant_id=agent`, {
+      method: "DELETE",
+    });
+    setDeleteSessionId(null);
+    if (!resp.ok) {
+      return;
+    }
+
+    await fetchChatSessions();
+    if (sid === sessionId) {
+      const newSid = await createNewSession();
+      if (newSid) {
+        await switchSession(newSid);
+      } else {
+        setMessages([]);
+      }
+    }
+  };
 
   const fetchPodcastSpeakerProfiles = async () => {
     const resp = await fetch("/api/podcast/speaker-profiles");
@@ -355,8 +424,8 @@ function App() {
     await fetchPodcastRuns();
   };
 
-  const fetchChatHistory = async (tid: string) => {
-    const resp = await fetch(`/api/chat/history?thread_id=${encodeURIComponent(tid)}&limit=200`);
+  const fetchChatHistory = async (sid: string) => {
+    const resp = await fetch(`/api/chat/history?session_id=${encodeURIComponent(sid)}&limit=200`);
     if (!resp.ok) {
       return;
     }
@@ -698,6 +767,7 @@ function App() {
         assistantBufferRef.current = { id: "", text: "" };
         pendingAssistantIdRef.current = null;
         pendingRefsRef.current = null;
+        void fetchChatSessions();
       }
       return;
     }
@@ -746,7 +816,7 @@ function App() {
         body: JSON.stringify({
           text: trimmed,
           files: selectedList,
-          thread_id: threadId,
+          session_id: sessionId,
           assistant_id: "agent",
         }),
         signal: abortController.signal,
@@ -885,7 +955,7 @@ function App() {
           ) : (
             <div class="sidebar-card">
               <div class="sidebar-header">
-                <h2>来源</h2>
+                <h2>{leftPanelMode === "sources" ? "来源" : "聊天历史"}</h2>
                 <div class="sidebar-header-actions">
                   <div class="icon-btn"><Icons.Settings /></div>
                   <button
@@ -899,6 +969,115 @@ function App() {
                 </div>
               </div>
 
+              <div style={{ display: "flex", gap: 8, padding: "0 12px 12px" }}>
+                <button
+                  type="button"
+                  class="source-search-chip"
+                  style={{ flex: 1, justifyContent: "center", opacity: leftPanelMode === "sources" ? 1 : 0.7 }}
+                  onClick={() => setLeftPanelMode("sources")}
+                >
+                  来源
+                </button>
+                <button
+                  type="button"
+                  class="source-search-chip"
+                  style={{ flex: 1, justifyContent: "center", opacity: leftPanelMode === "sessions" ? 1 : 0.7 }}
+                  onClick={() => {
+                    setLeftPanelMode("sessions");
+                    void fetchChatSessions();
+                  }}
+                >
+                  聊天历史
+                </button>
+              </div>
+
+              {leftPanelMode === "sessions" ? (
+                <>
+                <button
+                  class="add-source-btn"
+                  type="button"
+                  onClick={async () => {
+                    const newSid = await createNewSession();
+                    if (newSid) {
+                      await switchSession(newSid);
+                      await fetchChatSessions();
+                    }
+                  }}
+                >
+                  <Icons.Plus />
+                  新增会话
+                </button>
+                <div class="source-list" style={{ paddingTop: 0 }}>
+                  <div class="file-list">
+                    {chatSessions.length ? (
+                      chatSessions.map((s) => {
+                        const active = s.session_id === sessionId;
+                        const isDeleting = deleteSessionId === s.session_id;
+                        const timeText = s.updated_at
+                          ? new Date(s.updated_at).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                          : "";
+                        
+                        return (
+                          <div
+                            key={s.session_id}
+                            class={`file-item ${active ? "selected" : ""}`}
+                            onClick={() => void switchSession(s.session_id)}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {s.title || "新对话"}
+                              </div>
+                              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                                {timeText}{s.message_count ? ` · ${s.message_count} 条` : ""}
+                              </div>
+                            </div>
+                            {isDeleting ? (
+                              <button
+                                type="button"
+                                style={{ 
+                                  padding: "4px 12px",
+                                  background: "#dc3545",
+                                  color: "white",
+                                  border: "none",
+                                  borderRadius: 4,
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  whiteSpace: "nowrap"
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  confirmDeleteSession();
+                                }}
+                              >
+                                确认删除
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                class="ref-modal-close"
+                                style={{ width: 28, height: 28, lineHeight: "28px" }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  requestDeleteSession(s.session_id);
+                                }}
+                                aria-label="删除会话"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div class="ref-muted" style={{ padding: 12 }}>暂无历史对话</div>
+                    )}
+                  </div>
+                </div>
+                </>
+              ) : (
+                <>
               <button
                 class="add-source-btn"
                 type="button"
@@ -988,6 +1167,8 @@ function App() {
                   <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>暂无已上传文档</div>
                 )}
               </div>
+              </>
+              )}
 
               {uploadState.status !== "idle" && (
                 <div class="upload-status">
@@ -1497,15 +1678,13 @@ function App() {
                     <div style={{ marginTop: 12 }}>
                       <details>
                         <summary style={{ cursor: "pointer" }}>原始 JSON</summary>
-                        <pre class="ref-file" style={{ marginTop: 8 }}>
-                          {JSON.stringify(podcastRunDetail.result, null, 2)}
-                        </pre>
+                        <pre style={{ fontSize: 12, marginTop: 8 }}>{formatJson(podcastRunDetail.result)}</pre>
                       </details>
                     </div>
                   )}
                 </div>
               ) : (
-                <div class="ref-muted">暂无详情</div>
+                <div class="ref-muted">暂无数据</div>
               )}
             </div>
           </div>
@@ -1547,6 +1726,7 @@ function App() {
           </div>
         </div>
       )}
+
 
       <input
         ref={directoryInputRef}

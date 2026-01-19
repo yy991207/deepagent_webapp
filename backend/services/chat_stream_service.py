@@ -15,6 +15,7 @@ from deepagents_cli.agent import create_cli_agent
 
 from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
+from backend.services.checkpoint_service import CheckpointService
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ class ChatStreamService:
     ) -> AsyncGenerator[dict[str, Any], None]:
         if file_refs is None:
             file_refs = []
+
+        try:
+            checkpoint_service = CheckpointService()
+            await checkpoint_service.cleanup_keep_last(session_id=thread_id)
+        except Exception:
+            pass
 
         mongo = get_mongo_manager()
         memory_text = ""

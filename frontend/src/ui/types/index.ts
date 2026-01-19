@@ -103,6 +103,14 @@ export type AgentLog = {
   type: "info" | "error" | "tool";
 };
 
+ export type ChatSession = {
+   session_id: string;
+   title: string;
+   message_count: number;
+   created_at: string;
+   updated_at: string;
+ };
+
 export type SocketPayload =
   | { type: "chat.delta"; text: string }
   | { type: "tool.start"; id: string; name: string; args: unknown }

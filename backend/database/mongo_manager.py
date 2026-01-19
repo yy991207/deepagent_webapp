@@ -69,6 +69,10 @@ class MongoDbManager:
         client = self._get_client()
         return client[self._db_name][_DEFAULT_CHAT_MEMORY_COLLECTION]
 
+    def _chat_sessions_collection(self):
+        client = self._get_client()
+        return client[self._db_name][_DEFAULT_CHAT_SESSIONS_COLLECTION]
+
     def store_file(
         self,
         *,
@@ -336,6 +340,132 @@ class MongoDbManager:
         # 反转结果，按时间升序返回（旧消息在前，新消息在后）
         return list(reversed(out))
 
+    def upsert_chat_session_title(self, *, session_id: str, assistant_id: str, title: str) -> None:
+        """写入/更新会话标题。
+
+        说明：
+        - 这是给前端会话列表展示用的“自定义标题”。
+        - 若不设置该标题，列表接口会回退到“首条 user 消息缩略”。
+        """
+        now = get_beijing_time()
+        self._chat_sessions_collection().update_one(
+            {"session_id": session_id, "assistant_id": assistant_id},
+            {"$set": {"session_id": session_id, "assistant_id": assistant_id, "title": title, "updated_at": now}},
+            upsert=True,
+        )
+
+    def list_chat_sessions(self, *, assistant_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """列出会话列表。
+
+        返回字段：
+        - session_id: 会话 id（当前落库字段 thread_id 的语义视为 session_id）
+        - title: 自定义标题优先；否则取首条 user 消息缩略
+        - message_count: 消息数量（包含 tool 消息）
+        - created_at / updated_at: 创建与最后更新时间
+        """
+
+        match: dict[str, Any] = {}
+        if assistant_id:
+            match["assistant_id"] = assistant_id
+
+        pipeline: list[dict[str, Any]] = []
+        if match:
+            pipeline.append({"$match": match})
+
+        # 先按 created_at 升序，让 $first 更接近“首条消息”
+        pipeline.extend(
+            [
+                {"$sort": {"created_at": 1}},
+                {
+                    "$group": {
+                        "_id": "$thread_id",
+                        "created_at": {"$min": "$created_at"},
+                        "updated_at": {"$max": "$created_at"},
+                        "message_count": {"$sum": 1},
+                        "first_user_message": {
+                            "$first": {
+                                "$cond": [
+                                    {"$eq": ["$role", "user"]},
+                                    "$content",
+                                    None,
+                                ]
+                            }
+                        },
+                    }
+                },
+                {"$sort": {"updated_at": -1}},
+                {"$limit": max(min(limit, 200), 1)},
+            ]
+        )
+
+        rows = list(self._chat_collection().aggregate(pipeline))
+        if not rows:
+            return []
+
+        session_ids = [str(r.get("_id")) for r in rows]
+        title_map: dict[str, str] = {}
+
+        # 批量读取自定义标题
+        title_query: dict[str, Any] = {"session_id": {"$in": session_ids}}
+        if assistant_id:
+            title_query["assistant_id"] = assistant_id
+
+        for doc in self._chat_sessions_collection().find(title_query):
+            sid = str(doc.get("session_id") or "")
+            t = str(doc.get("title") or "").strip()
+            if sid and t:
+                title_map[sid] = t
+
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            sid = str(r.get("_id") or "")
+            created = r.get("created_at")
+            updated = r.get("updated_at")
+            created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
+            updated_at = updated.isoformat() if hasattr(updated, "isoformat") else str(updated)
+
+            fallback = str(r.get("first_user_message") or "").strip() or "新对话"
+            fallback_title = fallback[:30] + ("..." if len(fallback) > 30 else "")
+            title = title_map.get(sid) or fallback_title
+
+            out.append(
+                {
+                    "session_id": sid,
+                    "assistant_id": assistant_id,
+                    "title": title,
+                    "message_count": int(r.get("message_count") or 0),
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                }
+            )
+        return out
+
+    def delete_chat_session(self, *, session_id: str, assistant_id: str | None = None) -> dict[str, int]:
+        """删除某个会话在 MongoDB 下的所有聊天相关数据。"""
+
+        msg_filter: dict[str, Any] = {"thread_id": session_id}
+        if assistant_id:
+            msg_filter["assistant_id"] = assistant_id
+
+        msg_res = self._chat_collection().delete_many(msg_filter)
+
+        mem_filter: dict[str, Any] = {"thread_id": session_id}
+        if assistant_id:
+            mem_filter["assistant_id"] = assistant_id
+
+        mem_res = self._chat_memory_collection().delete_many(mem_filter)
+
+        sess_filter: dict[str, Any] = {"session_id": session_id}
+        if assistant_id:
+            sess_filter["assistant_id"] = assistant_id
+        sess_res = self._chat_sessions_collection().delete_many(sess_filter)
+
+        return {
+            "messages": int(getattr(msg_res, "deleted_count", 0) or 0),
+            "memories": int(getattr(mem_res, "deleted_count", 0) or 0),
+            "sessions": int(getattr(sess_res, "deleted_count", 0) or 0),
+        }
+
     def list_chat_threads(self, *, assistant_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         pipeline: list[dict[str, Any]] = []
         match: dict[str, Any] = {}
@@ -412,6 +542,7 @@ _DEFAULT_DB_NAME = os.getenv("DEEPAGENTS_MONGO_DB") or "deepagents_web"
 _DEFAULT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_COLLECTION") or "uploaded_sources"
 _DEFAULT_CHAT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_COLLECTION") or "chat_messages"
 _DEFAULT_CHAT_MEMORY_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_MEMORY_COLLECTION") or "agent_chat_memories"
+_DEFAULT_CHAT_SESSIONS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_SESSIONS_COLLECTION") or "chat_sessions"
 
 
 def get_mongo_manager() -> MongoDbManager:

@@ -32,7 +32,7 @@ const upsertToolMessage = (
   return [...prev, merged];
 };
 
-export function useChat(threadId: string, selectedList: string[], selectedAttachmentNames: AttachmentMeta[]) {
+export function useChat(sessionId: string, selectedList: string[], selectedAttachmentNames: AttachmentMeta[]) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState("就绪");
@@ -176,7 +176,7 @@ export function useChat(threadId: string, selectedList: string[], selectedAttach
         body: JSON.stringify({
           text: trimmed,
           files: selectedList,
-          thread_id: threadId,
+          session_id: sessionId,
           assistant_id: "agent",
         }),
         signal: abortController.signal,
