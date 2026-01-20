@@ -2520,6 +2520,26 @@ function ToolMessage({
     let data = status === "running" ? args : output;
     if (!data) return null;
 
+    // 查询类工具在执行中不要展示 JSON 入参，避免出现 {"value":""} 这种原始结构
+    if (status === "running") {
+      if (toolName === "web_search") {
+        const query = (args as any)?.query || (args as any)?.q || (args as any)?.value || "";
+        return <div class="ref-muted">正在搜索{query ? `：${query}` : "..."}</div>;
+      }
+      if (toolName === "rag_query") {
+        const query = (args as any)?.query || (args as any)?.q || (args as any)?.value || "";
+        return <div class="ref-muted">正在检索{query ? `：${query}` : "..."}</div>;
+      }
+      if (toolName === "http_request") {
+        const url = (args as any)?.url || (args as any)?.uri || (args as any)?.value || "";
+        return <div class="ref-muted">正在请求{url ? `：${url}` : "..."}</div>;
+      }
+      if (toolName === "fetch_url") {
+        const url = (args as any)?.url || (args as any)?.uri || (args as any)?.value || "";
+        return <div class="ref-muted">正在抓取{url ? `：${url}` : "..."}</div>;
+      }
+    }
+
     // 尝试解析 JSON 字符串
     if (typeof data === 'string') {
       try {
@@ -2577,10 +2597,14 @@ function ToolMessage({
           </div>
         );
       }
+      return <div class="ref-muted">暂无搜索结果</div>;
     }
 
     // RAG Query Results Rendering
     if (toolName === "rag_query" && Array.isArray(data)) {
+      if (!data.length) {
+        return <div class="ref-muted">暂无检索结果</div>;
+      }
       return (
         <div class="tool-results-list">
           {data.map((r: any, idx: number) => {
@@ -2955,8 +2979,11 @@ function ToolMessage({
       }
     }
 
-    // Default JSON rendering
-    return <pre class="tool-json-output">{formatJson(data)}</pre>;
+    // Default rendering: 避免直接展示 JSON
+    if (typeof data === "string") {
+      return <pre class="tool-text-output">{data}</pre>;
+    }
+    return <div class="ref-muted">暂无可展示内容</div>;
   };
 
   // 生成工具描述文本
