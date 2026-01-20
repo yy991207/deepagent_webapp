@@ -56,6 +56,12 @@ class ChatStreamService:
 
         extra_system_prompt = (
             extra_system_prompt + "\n\n" + 
+            "<reference_rules>\n"
+            "引用标记使用规则：\n"
+            "1. 只有在当前消息中存在 <rag_context> 检索片段时，才能使用 [1]、[2] 等引用标记\n"
+            "2. 如果当前消息没有 <rag_context>，绝对禁止在回复中使用任何 [n] 格式的引用标记\n"
+            "3. 不要模仿历史对话中的引用格式，每轮对话独立判断是否有检索上下文\n"
+            "</reference_rules>\n\n"
             "<file_write_rules>\n"
             "重要：文件写入规则\n\n"
             "当用户要求整理、总结、归纳、汇总内容时，或明确要求保存文档时：\n"

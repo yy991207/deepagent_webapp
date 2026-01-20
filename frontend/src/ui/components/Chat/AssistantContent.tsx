@@ -74,17 +74,8 @@ export function AssistantContent({
             </a>,
           );
         } else {
-          nodes.push(
-            <button
-              key={`${start}-${idx}`}
-              type="button"
-              class="ref-chip disabled"
-              title="暂无引用内容"
-              disabled
-            >
-              [{idx}]
-            </button>,
-          );
+          // 无对应 references 数据时，渲染为纯文本而非按钮
+          nodes.push(<span key={`${start}-${idx}`} class="ref-text-only">[{idx}]</span>);
         }
       } else if (mm[3]) {
         nodes.push(<strong class="md-bold">{mm[4]}</strong>);

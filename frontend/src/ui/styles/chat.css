@@ -275,6 +275,11 @@
   cursor: default;
 }
 
+.ref-text-only {
+  color: #5f6368;
+  font-size: 0.85em;
+}
+
 .ref-modal-backdrop {
   position: fixed;
   inset: 0;
