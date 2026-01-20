@@ -203,9 +203,11 @@ function App() {
   const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  const assistantBufferRef = useRef({ id: "", text: "" });
+  const assistantBufferRef = useRef<{ id: string; text: string }>({ id: "", text: "" });
   const pendingAssistantIdRef = useRef<string | null>(null);
-  const pendingRefsRef = useRef<RagReference[] | null>(null);
+  const pendingRefsRef = useRef<any[] | null>(null);
+  const currentMessageIdRef = useRef<string | null>(null);
+  const pendingWritesRef = useRef<Map<string, FilesystemWrite[]>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSessionIdRef = useRef<string>("");
 
@@ -468,7 +470,48 @@ function App() {
       }>;
     };
     const items = Array.isArray(data.messages) ? data.messages : [];
-    setFilesystemWrites(Array.isArray(data.writes) ? data.writes : []);
+    const writes = Array.isArray(data.writes) ? data.writes : [];
+    setFilesystemWrites(writes);
+
+    // 构建 write_id 到文档的映射
+    const writeMap = new Map<string, FilesystemWrite>();
+    writes.forEach(w => writeMap.set(w.write_id, w));
+
+    // 构建 tool_call_id 到 write_id 的映射（从 write_file 工具的 output 中提取）
+    const toolToWriteMap = new Map<string, string>();
+    items.forEach(m => {
+      if (m.role === "tool" && m.tool_name === "write_file" && m.tool_output) {
+        try {
+          const output = typeof m.tool_output === "string" ? JSON.parse(m.tool_output) : m.tool_output;
+          if (output.write_id) {
+            toolToWriteMap.set(String(m.tool_call_id || m.id), output.write_id);
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+    });
+
+    // 构建 assistant 消息 ID 到文档列表的映射
+    const assistantWritesMap = new Map<string, FilesystemWrite[]>();
+    
+    // 遍历消息，找到每个 write_file 工具调用对应的 assistant 消息
+    let currentAssistantId: string | null = null;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const m = items[i];
+      if (m.role === "assistant") {
+        currentAssistantId = m.id;
+      } else if (m.role === "tool" && m.tool_name === "write_file" && currentAssistantId) {
+        const writeId = toolToWriteMap.get(String(m.tool_call_id || m.id));
+        if (writeId && writeMap.has(writeId)) {
+          const write = writeMap.get(writeId)!;
+          if (!assistantWritesMap.has(currentAssistantId)) {
+            assistantWritesMap.set(currentAssistantId, []);
+          }
+          assistantWritesMap.get(currentAssistantId)!.push(write);
+        }
+      }
+    }
 
     const mapped: ChatMessage[] = items
       .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "tool")
@@ -497,7 +540,7 @@ function App() {
           };
         }
 
-        return {
+        const baseMessage = {
           id: m.id,
           role: m.role as "user" | "assistant",
           content: m.content || "",
@@ -506,8 +549,19 @@ function App() {
           suggestedQuestions: m.suggested_questions || [],
           timestamp,
         };
+
+        // 如果是 assistant 消息，绑定对应的文档
+        if (m.role === "assistant" && assistantWritesMap.has(m.id)) {
+          return {
+            ...baseMessage,
+            writes: assistantWritesMap.get(m.id),
+          };
+        }
+
+        return baseMessage;
       });
     setMessages(mapped);
+    console.log("历史会话加载完成，文档绑定情况:", Array.from(assistantWritesMap.entries()).map(([id, writes]) => ({ assistantId: id, writeCount: writes.length })));
   };
 
   useEffect(() => {
@@ -733,16 +787,28 @@ function App() {
       const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       if (!assistantBufferRef.current.id) {
         const id = pendingAssistantIdRef.current || createId();
+        console.log("chat.delta 创建新消息，使用 ID:", id, "来源:", pendingAssistantIdRef.current ? "后端 message_id" : "前端 createId()");
         assistantBufferRef.current = { id, text: "" };
         setMessages((prev: ChatMessage[]) => {
           const exists = prev.some((m) => m.id === id);
           if (exists) {
+            console.log("消息已存在，更新内容:", id);
             return prev.map((m) =>
               m.id === id && m.role === "assistant"
                 ? { ...m, timestamp, isPending: false, references: pendingRefsRef.current || m.references }
                 : m
             );
           }
+          console.log("创建新 assistant 消息:", id);
+          
+          // 检查是否有待绑定的文档
+          const pendingWrites = pendingWritesRef.current.get(id);
+          if (pendingWrites && pendingWrites.length > 0) {
+            console.log(`发现待绑定文档 ${pendingWrites.length} 个，立即绑定到消息 ${id}`);
+            pendingWritesRef.current.delete(id);
+            return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [], writes: pendingWrites }];
+          }
+          
           return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [] }];
         });
       }
@@ -754,6 +820,12 @@ function App() {
             : msg
         )
       );
+      return;
+    }
+    if (payload.type === "message.start") {
+      currentMessageIdRef.current = payload.message_id || null;
+      pendingAssistantIdRef.current = payload.message_id || null;
+      console.log("message.start 收到 message_id:", currentMessageIdRef.current);
       return;
     }
     if (payload.type === "tool.start") {
@@ -771,6 +843,7 @@ function App() {
       return;
     }
     if (payload.type === "tool.end") {
+      console.log("tool.end 事件收到:", { name: payload.name, status: payload.status, output: payload.output, message_id: (payload as any).message_id });
       addLog(`Tool End: ${payload.name}`, "tool");
       const endedAt = new Date().toISOString();
       setMessages((prev: ChatMessage[]) =>
@@ -782,6 +855,101 @@ function App() {
           endedAt,
         }),
       );
+
+      // 关键逻辑：write_file 工具结束后，直接把文档结果写入前端状态，避免必须刷新页面才能看到卡片
+      console.log("检查是否为 write_file:", { isWriteFile: payload.name === "write_file", notError: payload.status !== "error" });
+      if (payload.name === "write_file" && payload.status !== "error") {
+        let out = payload.output as any;
+        
+        // 如果 output 是字符串，尝试解析为 JSON
+        if (typeof out === "string") {
+          try {
+            out = JSON.parse(out);
+          } catch (e) {
+            console.warn("write_file output 不是有效的 JSON:", out);
+          }
+        }
+        
+        console.log("write_file tool.end 收到:", { output: out, type: typeof out });
+        
+        const writeId = out && typeof out === "object" ? String(out.write_id || "") : "";
+        if (writeId) {
+          const title = String(out.title || "文档");
+          const type = String(out.type || "txt");
+          const size = Number(out.size || 0);
+          const filePath = String(out.file_path || "");
+
+          const nextWrite: FilesystemWrite = {
+            write_id: writeId,
+            session_id: currentSessionIdRef.current,
+            file_path: filePath,
+            title,
+            type,
+            size,
+            created_at: new Date().toISOString(),
+          };
+
+          console.log("即将更新 filesystemWrites，新文档:", nextWrite);
+          
+          setFilesystemWrites((prev) => {
+            // 去重：同一个 write_id 只保留最新一条
+            const updated = [nextWrite, ...(prev || []).filter((w) => w.write_id !== writeId)];
+            console.log("filesystemWrites 已更新:", updated);
+            return updated;
+          });
+
+          // 绑定到当前 message_id 对应的 assistant 消息
+          const targetMessageId = (payload as any).message_id || currentMessageIdRef.current;
+          console.log("write_file 绑定到 message_id:", targetMessageId);
+          
+          setMessages((prev) => {
+            console.log("绑定文档时的消息列表:", prev.map(m => ({ id: m.id, role: m.role })));
+            
+            if (!targetMessageId) {
+              console.warn("没有 targetMessageId，使用回退逻辑");
+              // 如果没有 message_id，回退到旧逻辑：绑定到最后一条 assistant 消息
+              const lastAssistantIndex = [...prev].map((m, i) => ({ m, i }))
+                .reverse()
+                .find((x) => x.m.role === "assistant")?.i;
+
+              if (lastAssistantIndex === undefined) {
+                console.warn("没有找到 assistant 消息");
+                return prev;
+              }
+
+              return prev.map((m, i) => {
+                if (i !== lastAssistantIndex || m.role !== "assistant") {
+                  return m;
+                }
+                const existing = Array.isArray((m as any).writes) ? ((m as any).writes as FilesystemWrite[]) : [];
+                const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
+                return { ...(m as any), writes: merged };
+              });
+            }
+
+            // 找到 id 匹配的 assistant 消息
+            const matchedMessage = prev.find(m => m.id === targetMessageId && m.role === "assistant");
+            if (!matchedMessage) {
+              console.warn(`未找到匹配的 assistant 消息: ${targetMessageId}，缓存文档等待消息创建`);
+              // 缓存文档，等消息创建后再绑定
+              const existing = pendingWritesRef.current.get(targetMessageId) || [];
+              pendingWritesRef.current.set(targetMessageId, [nextWrite, ...existing]);
+              console.log(`已缓存文档到 pendingWritesRef，message_id: ${targetMessageId}，当前缓存:`, Array.from(pendingWritesRef.current.entries()));
+              return prev;
+            }
+            
+            return prev.map((m) => {
+              if (m.id !== targetMessageId || m.role !== "assistant") {
+                return m;
+              }
+              const existing = Array.isArray((m as any).writes) ? ((m as any).writes as FilesystemWrite[]) : [];
+              const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
+              console.log(`文档已绑定到消息 ${targetMessageId}:`, merged);
+              return { ...(m as any), writes: merged };
+            });
+          });
+        }
+      }
       return;
     }
     if (payload.type === "session.status") {
@@ -1234,6 +1402,13 @@ function App() {
                </div>
             )}
             {messages.map((message, index) => {
+              const lastAssistantIndex = (() => {
+                for (let i = messages.length - 1; i >= 0; i -= 1) {
+                  if (messages[i].role === "assistant") return i;
+                }
+                return -1;
+              })();
+
               // 判断是否是连续工具调用中的第一个（前一个消息不是 tool）
               const prevMessage = index > 0 ? messages[index - 1] : null;
               const isFirstToolInSequence = message.role === "tool" && (!prevMessage || prevMessage.role !== "tool");
@@ -1276,47 +1451,70 @@ function App() {
                           />
                         </div>
                       </div>
-                      {filesystemWrites.length > 0 && (
-                        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                          {filesystemWrites.map((w) => (
-                            <div
-                              key={w.write_id}
-                              style={{
-                                background: "#f8f9fa",
-                                border: "1px solid #e9ecef",
-                                borderRadius: 8,
-                                padding: "10px 12px",
-                                cursor: "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 10,
-                                transition: "all 0.2s"
-                              }}
-                              onClick={async () => {
-                                const resp = await fetch(`/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`);
-                                if (resp.ok) {
-                                  const data = await resp.json();
-                                  setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
-                                  setWriteDetailOpen(true);
-                                }
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.background = "#e9ecef")}
-                              onMouseLeave={(e) => (e.currentTarget.style.background = "#f8f9fa")}
-                            >
-                              <div style={{ fontSize: 20 }}>📄</div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {w.title}
+                      {(() => {
+                        const boundWrites = Array.isArray((message as any).writes)
+                          ? ((message as any).writes as FilesystemWrite[])
+                          : [];
+
+                        if (!boundWrites.length) {
+                          return null;
+                        }
+
+                        return (
+                          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                            {boundWrites.map((w: FilesystemWrite) => (
+                              <div
+                                key={w.write_id}
+                                style={{
+                                  background: "#f8f9fa",
+                                  border: "1px solid #e9ecef",
+                                  borderRadius: 8,
+                                  padding: "10px 12px",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 10,
+                                  transition: "all 0.2s",
+                                }}
+                                onClick={async () => {
+                                  const resp = await fetch(
+                                    `/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`,
+                                  );
+                                  if (resp.ok) {
+                                    const data = await resp.json();
+                                    setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
+                                    setWriteDetailOpen(true);
+                                  }
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = "#e9ecef")}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = "#f8f9fa")}
+                              >
+                                <div style={{ display: "flex", alignItems: "center" }}>
+                                  <Icons.Pdf />
                                 </div>
-                                <div style={{ fontSize: 12, color: "#6c757d" }}>
-                                  {w.type} · {(w.size / 1024).toFixed(1)}KB
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 13,
+                                      fontWeight: 600,
+                                      color: "#1a1a1a",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {w.title}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#6c757d" }}>
+                                    {w.type} · {(w.size / 1024).toFixed(1)}KB
+                                  </div>
                                 </div>
+                                <div style={{ fontSize: 12, color: "#0d6efd", fontWeight: 500 }}>查看</div>
                               </div>
-                              <div style={{ fontSize: 12, color: "#0d6efd", fontWeight: 500 }}>查看</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <div class="message-actions">
                         <button class="action-btn"><Icons.Copy /></button>
                         <button class="action-btn"><Icons.ThumbUp /></button>
@@ -1860,7 +2058,14 @@ function App() {
               {writeDetail ? (
                 <div>
                   <div class="ref-section-title">文档内容</div>
-                  <pre class="ref-file" style={{ maxHeight: "calc(100vh - 150px)" }}>{writeDetail.content}</pre>
+                  <div style={{ maxHeight: "calc(100vh - 150px)", overflow: "auto" }}>
+                    <AssistantContent
+                      text={writeDetail.content}
+                      isPending={false}
+                      references={[]}
+                      onOpenRef={() => {}}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div class="ref-muted">加载中...</div>
@@ -2400,12 +2605,57 @@ function ToolMessage({
       );
     }
 
-    // File Operation Rendering
+    // File Operation Rendering - 特别美化 write_file（参考 AnyGen）
     if (["read_file", "write_file", "edit_file", "write_to_file", "edit", "replace_file_content"].includes(toolName)) {
       const path = (args as any)?.file_path || (args as any)?.path || (args as any)?.TargetFile || "";
       const isReadOp = toolName.includes("read");
       const isWriteOp = toolName.includes("write") || toolName === "write_to_file";
       const isEditOp = toolName.includes("edit") || toolName.includes("replace");
+      
+      // write_file 专用美化 UI（参考 AnyGen 样式）
+      if (isWriteOp && status === "done") {
+        let parsedOutput = data;
+        if (typeof parsedOutput === "string") {
+          try {
+            parsedOutput = JSON.parse(parsedOutput);
+          } catch (e) {
+            // 保持原样
+          }
+        }
+        
+        const title = (parsedOutput as any)?.title || path.split("/").pop() || "未知文件";
+        const fileType = (parsedOutput as any)?.type || "txt";
+        const fileSize = (parsedOutput as any)?.size || 0;
+        
+        return (
+          <div class="tool-file-box write-file-box">
+            <div class="write-file-header">
+              <div class="write-file-icon">
+                <Icons.Pdf />
+              </div>
+              <div class="write-file-info">
+                <div class="write-file-title">{title}</div>
+                <div class="write-file-meta">
+                  <span class="file-type">{fileType}</span>
+                  <span class="file-separator">·</span>
+                  <span class="file-size">{(fileSize / 1024).toFixed(1)}KB</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="write-file-steps">
+              <div class="step-item completed">
+                <div class="step-icon success">✓</div>
+                <div class="step-text">未知文件</div>
+              </div>
+              <div class="step-item completed">
+                <div class="step-icon success">✓</div>
+                <div class="step-text">操作成功</div>
+              </div>
+            </div>
+          </div>
+        );
+      }
       
       // 从 output 字符串中提取文件路径（如果 path 为空）
       let displayPath = path;

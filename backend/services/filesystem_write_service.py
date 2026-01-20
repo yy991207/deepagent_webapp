@@ -68,6 +68,7 @@ class FilesystemWriteService:
 
                 return {
                     "write_id": write_id,
+                    "file_path": file_path,
                     "title": metadata["title"],
                     "type": file_type,
                     "size": len(content),

@@ -57,19 +57,29 @@ class ChatStreamService:
         extra_system_prompt = (
             extra_system_prompt + "\n\n" + 
             "<file_write_rules>\n"
-            "**重要：文件写入后的回复规则**\n\n"
-            "当你使用 write_file 工具保存文件后：\n"
-            "1. **绝对禁止**在回复中提及任何文件路径（包括相对路径和绝对路径）\n"
-            "2. **绝对禁止**使用引号或代码块包裹路径\n"
-            "3. **只能**说：'文档已保存' 或 '内容已整理成文档'\n"
-            "4. 用户会在聊天界面看到文档卡片，可以点击查看\n\n"
-            "正确示例：\n"
-            "- ✅ '我已将内容整理成文档，你可以点击下方的文档卡片查看。'\n"
-            "- ✅ '文档已保存，请点击查看。'\n\n"
-            "错误示例：\n"
-            "- ❌ '已保存到 /Users/yang/...'\n"
-            "- ❌ '文件路径为：...'\n"
-            "- ❌ '保存在 `agent_framework_summary.md`'\n"
+            "重要：文件写入规则\n\n"
+            "当用户要求整理、总结、归纳、汇总内容时，或明确要求保存文档时：\n"
+            "1. 必须先调用 write_file 工具将内容保存成文档，不要只在回复里展示内容\n"
+            "2. write_file 工具会将内容写入数据库，不是本地文件系统\n"
+            "3. 禁止使用 read_file 工具读取刚写入的文档（文档不在本地文件系统）\n"
+            "4. 工具调用成功后，再在回复中说明文档已保存\n"
+            "5. 禁止在回复中提及任何文件路径或文件名\n"
+            "6. 禁止使用引号或代码块包裹路径或文件名\n"
+            "7. 用户会在聊天界面看到文档卡片，可以点击查看\n\n"
+            "触发场景示例：\n"
+            "- 用户说：帮我整理一份XXX总结\n"
+            "- 用户说：归纳一下XXX要点\n"
+            "- 用户说：把这些内容汇总成文档\n"
+            "以上场景都必须调用 write_file 工具保存文档\n\n"
+            "正确流程：\n"
+            "- 先调用 write_file('/workspace/summary.md', '内容...', '总结文档')\n"
+            "- 工具返回成功后，直接回复：我已将内容整理成文档，你可以点击下方的文档卡片查看。\n"
+            "- 不要再调用 read_file 读取刚写的文档\n\n"
+            "错误做法：\n"
+            "- 不调用工具，直接在回复里展示整理好的内容\n"
+            "- 不调用工具，直接说文档已保存\n"
+            "- 调用 write_file 后又调用 read_file 读取刚写的文档\n"
+            "- 在回复里提路径或文件名\n"
             "</file_write_rules>"
         ).strip()
 
@@ -255,7 +265,11 @@ class ChatStreamService:
                 enable_shell=False,
             )
 
+            from backend.utils.snowflake import generate_snowflake_id
+            current_message_id = str(generate_snowflake_id())
+            
             yield {"type": "session.status", "status": "thinking"}
+            yield {"type": "message.start", "message_id": current_message_id}
 
             effective_user_text = text
             if forced_rag_refs:
@@ -340,13 +354,15 @@ class ChatStreamService:
                             except Exception:
                                 pass
 
-                            yield {
+                            tool_end_event = {
                                 "type": "tool.end",
                                 "id": tool_id,
                                 "name": tool_name,
                                 "status": getattr(message, "status", "success"),
                                 "output": message.content,
+                                "message_id": current_message_id,
                             }
+                            yield tool_end_event
 
                             if saw_tool_call and not active_tool_ids and pending_text_deltas:
                                 for delta in pending_text_deltas:
