@@ -311,8 +311,27 @@ class MongoDbManager:
         )
         out: list[dict[str, Any]] = []
         for item in cursor:
+            # MongoDB 存储的是 UTC 时间，需要转换为北京时间
             created = item.get("created_at")
-            created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
+            if isinstance(created, datetime):
+                # 如果是 naive datetime（无时区信息），假定为 UTC，转换为北京时间
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
+                created_at = created.isoformat()
+            else:
+                created_at = str(created) if created else None
+            
+            # 处理 started_at 和 ended_at
+            started = item.get("started_at")
+            if isinstance(started, datetime) and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
+            started_at = started.isoformat() if hasattr(started, "isoformat") else started
+            
+            ended = item.get("ended_at")
+            if isinstance(ended, datetime) and ended.tzinfo is None:
+                ended = ended.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
+            ended_at = ended.isoformat() if hasattr(ended, "isoformat") else ended
+            
             out.append(
                 {
                     "id": str(item.get("_id")),
@@ -328,16 +347,8 @@ class MongoDbManager:
                     "tool_args": item.get("tool_args"),
                     "tool_status": item.get("tool_status"),
                     "tool_output": item.get("tool_output"),
-                    "started_at": (
-                        item.get("started_at").isoformat()
-                        if hasattr(item.get("started_at"), "isoformat")
-                        else item.get("started_at")
-                    ),
-                    "ended_at": (
-                        item.get("ended_at").isoformat()
-                        if hasattr(item.get("ended_at"), "isoformat")
-                        else item.get("ended_at")
-                    ),
+                    "started_at": started_at,
+                    "ended_at": ended_at,
                     "created_at": created_at,
                 }
             )
@@ -423,9 +434,16 @@ class MongoDbManager:
         out: list[dict[str, Any]] = []
         for r in rows:
             sid = str(r.get("_id") or "")
+            
+            # MongoDB 存储的是 UTC 时间，需要转换为北京时间
             created = r.get("created_at")
-            updated = r.get("updated_at")
+            if isinstance(created, datetime) and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
             created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
+            
+            updated = r.get("updated_at")
+            if isinstance(updated, datetime) and updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
             updated_at = updated.isoformat() if hasattr(updated, "isoformat") else str(updated)
 
             fallback = str(r.get("first_user_message") or "").strip() or "新对话"
@@ -472,7 +490,10 @@ class MongoDbManager:
         if not doc:
             return None
 
+        # MongoDB 存储的是 UTC 时间，需要转换为北京时间
         created = doc.get("created_at")
+        if isinstance(created, datetime) and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
         created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
 
         return {
@@ -494,7 +515,10 @@ class MongoDbManager:
 
         out: list[dict[str, Any]] = []
         for doc in cursor:
+            # MongoDB 存储的是 UTC 时间，需要转换为北京时间
             created = doc.get("created_at")
+            if isinstance(created, datetime) and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
             created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
             metadata = doc.get("metadata") or {}
 
