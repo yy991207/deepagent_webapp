@@ -1470,21 +1470,10 @@ function App() {
                                   border: "1px solid #e9ecef",
                                   borderRadius: 8,
                                   padding: "10px 12px",
-                                  cursor: "pointer",
                                   display: "flex",
                                   alignItems: "center",
                                   gap: 10,
                                   transition: "all 0.2s",
-                                }}
-                                onClick={async () => {
-                                  const resp = await fetch(
-                                    `/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`,
-                                  );
-                                  if (resp.ok) {
-                                    const data = await resp.json();
-                                    setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
-                                    setWriteDetailOpen(true);
-                                  }
                                 }}
                                 onMouseEnter={(e) => (e.currentTarget.style.background = "#e9ecef")}
                                 onMouseLeave={(e) => (e.currentTarget.style.background = "#f8f9fa")}
@@ -1492,7 +1481,19 @@ function App() {
                                 <div style={{ display: "flex", alignItems: "center" }}>
                                   <Icons.Pdf />
                                 </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
+                                <div
+                                  style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+                                  onClick={async () => {
+                                    const resp = await fetch(
+                                      `/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`,
+                                    );
+                                    if (resp.ok) {
+                                      const data = await resp.json();
+                                      setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
+                                      setWriteDetailOpen(true);
+                                    }
+                                  }}
+                                >
                                   <div
                                     style={{
                                       fontSize: 13,
@@ -1509,7 +1510,44 @@ function App() {
                                     {w.type} · {(w.size / 1024).toFixed(1)}KB
                                   </div>
                                 </div>
-                                <div style={{ fontSize: 12, color: "#0d6efd", fontWeight: 500 }}>查看</div>
+                                <button
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    padding: "6px",
+                                    color: "#6c757d",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    borderRadius: 4,
+                                    transition: "all 0.2s",
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const downloadUrl = `/api/filesystem/write/${encodeURIComponent(w.write_id)}/download?session_id=${encodeURIComponent(sessionId)}`;
+                                    const link = document.createElement("a");
+                                    link.href = downloadUrl;
+                                    link.download = w.title.endsWith(".md") ? w.title : `${w.title}.md`;
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = "#e9ecef";
+                                    e.currentTarget.style.color = "#495057";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = "transparent";
+                                    e.currentTarget.style.color = "#6c757d";
+                                  }}
+                                >
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                  </svg>
+                                </button>
                               </div>
                             ))}
                           </div>
