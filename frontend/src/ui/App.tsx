@@ -783,7 +783,7 @@ function App() {
       }
       return;
     }
-    if (payload.type === "chat.delta") {
+    if (payload.type === "chat.delta" || payload.type === "delta") {
       const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       if (!assistantBufferRef.current.id) {
         const id = pendingAssistantIdRef.current || createId();
@@ -1585,36 +1585,34 @@ function App() {
                         </div>
                      )}
                      <div class={`message-bubble ${message.role}`}>
-                        {(
-                          <div class="message-content">
-                            {message.content}
-                            {!!message.attachments?.length && (
-                              <div class="message-attachments">
-                                <div class="message-attachments-header">已附带来源</div>
-                                <div class="message-attachments-chips">
-                                  {(message.attachments.filter(Boolean) as AttachmentMeta[]).slice(0, 8).map((p) => {
-                                    const mongoId = typeof p === "string" ? p : (p.mongo_id || "");
-                                    const filename = typeof p === "string" ? "" : (p.filename || "");
-                                    const title = filename || mongoId;
-                                    const label = (filename || mongoId).split("/").pop();
-                                    return (
-                                      <span
-                                        key={mongoId || filename || JSON.stringify(p)}
-                                        class="attachment-chip"
-                                        title={title}
-                                      >
-                                        {label}
-                                      </span>
-                                    );
-                                  })}
-                                  {message.attachments.length > 8 && (
-                                    <span class="attachment-chip">+{message.attachments.length - 8}</span>
-                                  )}
-                                </div>
+                        <div class="message-content">
+                          {message.content}
+                          {!!message.attachments?.length && (
+                            <div class="message-attachments">
+                              <div class="message-attachments-header">已附带来源</div>
+                              <div class="message-attachments-chips">
+                                {(message.attachments.filter(Boolean) as AttachmentMeta[]).slice(0, 8).map((p) => {
+                                  const mongoId = typeof p === "string" ? p : (p.mongo_id || "");
+                                  const filename = typeof p === "string" ? "" : (p.filename || "");
+                                  const title = filename || mongoId;
+                                  const label = (filename || mongoId).split("/").pop();
+                                  return (
+                                    <span
+                                      key={mongoId || filename || JSON.stringify(p)}
+                                      class="attachment-chip"
+                                      title={title}
+                                    >
+                                      {label}
+                                    </span>
+                                  );
+                                })}
+                                {message.attachments.length > 8 && (
+                                  <span class="attachment-chip">+{message.attachments.length - 8}</span>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        )}
+                            </div>
+                          )}
+                        </div>
                      </div>
                   </div>
                 )}

@@ -129,6 +129,7 @@ type SocketPayloadBase = {
 export type SocketPayload = SocketPayloadBase &
   (
     | { type: "chat.delta"; text: string }
+    | { type: "delta"; text: string }
     | { type: "message.start"; message_id: string }
     | { type: "tool.start"; id: string; name: string; args: unknown }
     | { type: "tool.end"; id: string; name: string; status: string; output: unknown; message_id?: string }
