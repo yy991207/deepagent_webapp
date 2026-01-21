@@ -9,6 +9,7 @@ from typing import Any
 from bson.binary import Binary
 from bson.objectid import ObjectId
 from pymongo import MongoClient
+from pymongo import ReturnDocument
 
 
 # 东八区北京时区
@@ -76,6 +77,10 @@ class MongoDbManager:
     def _filesystem_writes_collection(self):
         client = self._get_client()
         return client[self._db_name][_DEFAULT_FILESYSTEM_WRITES_COLLECTION]
+
+    def _distributed_locks_collection(self):
+        client = self._get_client()
+        return client[self._db_name][_DEFAULT_DISTRIBUTED_LOCKS_COLLECTION]
 
     def store_file(
         self,
@@ -300,6 +305,76 @@ class MongoDbManager:
             },
             upsert=True,
         )
+
+    def set_chat_memory(
+        self,
+        *,
+        thread_id: str,
+        assistant_id: str,
+        memory_text: str,
+    ) -> None:
+        """覆盖写入 chat memory。"""
+        now = get_beijing_time()
+        self._chat_memory_collection().update_one(
+            {"thread_id": thread_id, "assistant_id": assistant_id},
+            {
+                "$set": {
+                    "thread_id": thread_id,
+                    "assistant_id": assistant_id,
+                    "memory_text": str(memory_text or ""),
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+
+    def acquire_distributed_lock(
+        self,
+        *,
+        lock_key: str,
+        owner_id: str,
+        ttl_seconds: int,
+    ) -> bool:
+        """获取分布式锁（Mongo 版本）。
+
+        说明：
+        - 单条记录表示一个锁
+        - expires_at 过期后可被其他 owner 抢占
+        """
+        if not lock_key or not owner_id or ttl_seconds <= 0:
+            return False
+
+        now = get_beijing_time()
+        expires_at = now + timedelta(seconds=int(ttl_seconds))
+        query = {
+            "lock_key": lock_key,
+            "$or": [
+                {"expires_at": {"$lte": now}},
+                {"expires_at": {"$exists": False}},
+                {"owner_id": owner_id},
+            ],
+        }
+        update = {
+            "$set": {
+                "lock_key": lock_key,
+                "owner_id": owner_id,
+                "expires_at": expires_at,
+                "updated_at": now,
+            }
+        }
+        doc = self._distributed_locks_collection().find_one_and_update(
+            query,
+            update,
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return bool(doc and doc.get("owner_id") == owner_id)
+
+    def release_distributed_lock(self, *, lock_key: str, owner_id: str) -> None:
+        """释放分布式锁（仅允许 owner 释放）。"""
+        if not lock_key or not owner_id:
+            return
+        self._distributed_locks_collection().delete_one({"lock_key": lock_key, "owner_id": owner_id})
 
     def get_chat_history(self, *, thread_id: str, limit: int = 200) -> list[dict[str, Any]]:
         # 修复：按降序查询最新的 N 条记录，然后反转结果
@@ -643,6 +718,7 @@ _DEFAULT_CHAT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_COLLECTION") or "cha
 _DEFAULT_CHAT_MEMORY_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_MEMORY_COLLECTION") or "agent_chat_memories"
 _DEFAULT_CHAT_SESSIONS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_SESSIONS_COLLECTION") or "chat_sessions"
 _DEFAULT_FILESYSTEM_WRITES_COLLECTION = os.getenv("DEEPAGENTS_MONGO_FILESYSTEM_WRITES_COLLECTION") or "filesystem_writes"
+_DEFAULT_DISTRIBUTED_LOCKS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_DISTRIBUTED_LOCKS_COLLECTION") or "distributed_locks"
 
 
 def get_mongo_manager() -> MongoDbManager:

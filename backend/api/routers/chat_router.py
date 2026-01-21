@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.database.mongo_manager import get_mongo_manager
 from backend.services.chat_stream_service import ChatStreamService
+from backend.services.memory_summary_service import MemorySummaryService
 from backend.utils.snowflake import generate_snowflake_id
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.session_cancel_service import get_session_cancel_service
@@ -166,6 +168,70 @@ def chat_memory(thread_id: str, assistant_id: str = "agent") -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
     return {"thread_id": thread_id, "assistant_id": assistant_id, "memory_text": memory_text}
+
+
+@router.get("/api/chat/memory/stats")
+def chat_memory_stats(thread_id: str, assistant_id: str = "agent") -> dict[str, Any]:
+    """查询 chat memory 的字数统计。
+
+    返回：
+    - memory_text_chars: 当前字数
+    - memory_limit: 阈值（默认 5000）
+    - ratio: 0~1
+    - reached_limit: 是否达到阈值
+    """
+    mongo = get_mongo_manager()
+
+    # 阈值配置放到 env，避免硬编码
+    max_chars = int(os.getenv("DEEPAGENTS_CHAT_MEMORY_MAX_CHARS") or "5000")
+
+    try:
+        memory_text = mongo.get_chat_memory(thread_id=thread_id, assistant_id=assistant_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
+
+    memory_chars = len(str(memory_text or ""))
+    ratio = min(memory_chars / float(max_chars), 1.0) if max_chars > 0 else 0.0
+    return {
+        "thread_id": thread_id,
+        "assistant_id": assistant_id,
+        "memory_text_chars": memory_chars,
+        "memory_limit": max_chars,
+        "ratio": ratio,
+        "reached_limit": bool(max_chars > 0 and memory_chars >= max_chars),
+    }
+
+
+@router.post("/api/chat/memory/summary")
+async def chat_memory_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """当 chat memory 达到阈值时，用 LLM 做一次压缩总结并覆盖写回 memory_text。
+
+    说明：
+    - 总结完成后会直接覆盖写回 memory_text
+    - 同时返回总结后的字数/占比，供前端刷新圆环
+    """
+    thread_id = str(payload.get("thread_id") or payload.get("session_id") or "").strip()
+    assistant_id = str(payload.get("assistant_id") or "agent")
+    force = bool(payload.get("force") or False)
+
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    max_chars = int(os.getenv("DEEPAGENTS_CHAT_MEMORY_MAX_CHARS") or "5000")
+    summary_max_chars = int(os.getenv("DEEPAGENTS_CHAT_MEMORY_SUMMARY_MAX_CHARS") or "500")
+    lock_ttl_seconds = int(os.getenv("DEEPAGENTS_CHAT_MEMORY_SUMMARY_LOCK_TTL_SECONDS") or "120")
+
+    service = MemorySummaryService(
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        max_memory_chars=max_chars,
+        summary_max_chars=summary_max_chars,
+        lock_ttl_seconds=lock_ttl_seconds,
+    )
+
+    result = await service.summarize_if_needed(force=force)
+    # 统一补充 thread_id/assistant_id，方便前端处理
+    return {"thread_id": thread_id, "assistant_id": assistant_id, **result}
 
 
 @router.post("/api/chat/stream")

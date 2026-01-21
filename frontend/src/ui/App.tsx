@@ -31,6 +31,44 @@ import {
 import { useChat } from "./hooks/useChat";
 
 
+function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: number; title: string }) {
+  const size = 16;
+  const stroke = 2;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const safeRatio = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0;
+  const dashOffset = c * (1 - safeRatio);
+  const progressColor = chars < 4000 ? "#34a853" : "#f9ab00";
+
+  return (
+    <div class="memory-ring" title={title} aria-label={title}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke="rgba(60, 64, 67, 0.45)"
+          stroke-width={stroke}
+          fill="none"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={progressColor}
+          stroke-width={stroke}
+          fill="none"
+          stroke-linecap="round"
+          stroke-dasharray={c}
+          stroke-dashoffset={dashOffset}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+    </div>
+  );
+}
+
+
 const upsertToolMessage = (
   prev: ChatMessage[],
   nextTool: Omit<Extract<ChatMessage, { role: "tool" }>, "role" | "id">,
@@ -202,6 +240,13 @@ function App() {
   const [podcastRunDetail, setPodcastRunDetail] = useState<PodcastRunDetail | null>(null);
   const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
 
+  const [memoryStats, setMemoryStats] = useState<{ chars: number; limit: number; ratio: number }>({
+    chars: 0,
+    limit: 5000,
+    ratio: 0,
+  });
+  const memorySummaryRunningRef = useRef(false);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const assistantBufferRef = useRef<{ id: string; text: string }>({ id: "", text: "" });
   const pendingAssistantIdRef = useRef<string | null>(null);
@@ -252,12 +297,57 @@ function App() {
     void fetchSources();
     void fetchChatHistory(sessionId);
     void fetchChatSessions();
+    void refreshMemoryStats(sessionId);
     void fetchPodcastSpeakerProfiles();
     void fetchPodcastRuns();
     return () => {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  const refreshMemoryStats = async (sid: string) => {
+    const threadId = String(sid || "").trim();
+    if (!threadId) return;
+    try {
+      const resp = await fetch(`/api/chat/memory/stats?thread_id=${encodeURIComponent(threadId)}&assistant_id=agent`);
+      if (!resp.ok) return;
+      const data = (await resp.json()) as any;
+      const chars = Number(data.memory_text_chars || 0);
+      const limit = Number(data.memory_limit || 5000);
+      const ratio = Number(data.ratio || 0);
+      setMemoryStats({ chars, limit, ratio });
+    } catch {
+      // ignore
+    }
+  };
+
+  const runMemorySummaryIfNeeded = async (sid: string) => {
+    const threadId = String(sid || "").trim();
+    if (!threadId) return;
+    if (memorySummaryRunningRef.current) return;
+    // 达到阈值才触发 summary
+    if (!(memoryStats.limit > 0 && memoryStats.chars >= memoryStats.limit)) return;
+
+    memorySummaryRunningRef.current = true;
+    try {
+      const resp = await fetch("/api/chat/memory/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, assistant_id: "agent" }),
+      });
+      if (!resp.ok) return;
+      const data = (await resp.json()) as any;
+      // 总结完成后，用接口返回的字数占比立刻刷新圆环
+      const chars = Number(data.memory_text_chars || 0);
+      const limit = Number(data.memory_limit || memoryStats.limit || 5000);
+      const ratio = Number(data.ratio || 0);
+      setMemoryStats({ chars, limit, ratio });
+    } catch {
+      // ignore
+    } finally {
+      memorySummaryRunningRef.current = false;
+    }
+  };
 
   const fetchChatSessions = async () => {
     const resp = await fetch(`/api/chat/sessions?assistant_id=agent&limit=50`);
@@ -301,6 +391,7 @@ function App() {
       // ignore
     }
     await fetchChatHistory(next);
+    await refreshMemoryStats(next);
   };
 
   const requestDeleteSession = (sid: string) => {
@@ -962,6 +1053,12 @@ function App() {
         pendingAssistantIdRef.current = null;
         pendingRefsRef.current = null;
         void fetchChatSessions();
+
+        // 每轮对话结束后刷新字数圆环；达到阈值则触发一次总结并同步更新圆环
+        void (async () => {
+          await refreshMemoryStats(currentSessionIdRef.current);
+          await runMemorySummaryIfNeeded(currentSessionIdRef.current);
+        })();
       }
       return;
     }
@@ -985,6 +1082,9 @@ function App() {
     if (!trimmed) {
       return;
     }
+    // 确保 currentSessionIdRef 和当前 sessionId 同步，避免 SSE 事件被过滤
+    currentSessionIdRef.current = sessionId;
+    
     const attachments = selectedAttachmentNames;
     const pendingAssistantId = createId();
     pendingAssistantIdRef.current = pendingAssistantId;
@@ -1673,6 +1773,11 @@ function App() {
                   <button type="button" class="input-action-btn" title="提及">
                     <Icons.User />
                   </button>
+                  <MemoryProgressRing
+                    ratio={memoryStats.ratio}
+                    chars={memoryStats.chars}
+                    title={`记忆字数 ${memoryStats.chars}/${memoryStats.limit}`}
+                  />
                 </div>
                 <div class="input-actions-right">
                   <button type="button" class="input-action-btn" title="语音">

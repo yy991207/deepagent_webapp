@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()  # 加载 .env 环境变量，必须在其他模块导入前执行
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
