@@ -1,4 +1,9 @@
-"""webapp 内置的 deepagents_cli 配置实现，避免依赖外部仓库。"""
+"""DeepAgents 运行时配置（webapp 内置）。
+
+说明：
+- 这里承接原 deepagents_cli.config 的职责，但归档到 backend/config，避免单独 cli 目录。
+- 路径统一使用相对路径（.deepagents/），避免部署时绝对路径找不到。
+"""
 
 from __future__ import annotations
 
@@ -7,12 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from langchain_openai import ChatOpenAI
 from langchain_core.language_models import BaseChatModel
+from langchain_openai import ChatOpenAI
 
 
 def _find_project_root(start_path: Optional[Path] = None) -> Optional[Path]:
     """向上查找 git 根目录，用于识别项目根路径。"""
+
     current = Path(start_path or Path.cwd()).resolve()
     for parent in [current, *list(current.parents)]:
         if (parent / ".git").exists():
@@ -34,6 +40,7 @@ class Settings:
 
     def ensure_agent_dir(self, assistant_id: str) -> Path:
         """确保 agent 目录存在，用于 RAG 索引等落地。"""
+
         base = Path(".deepagents") / str(assistant_id)
         base.mkdir(parents=True, exist_ok=True)
         return base
@@ -48,6 +55,7 @@ settings = Settings(
 
 def create_model(model_name: str | None = None) -> BaseChatModel:
     """创建 LLM 实例，统一从环境变量读取配置。"""
+
     resolved_model = model_name or os.environ.get("OPENAI_MODEL") or "qwen-turbo"
     base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
     temperature_raw = os.environ.get("OPENAI_TEMPERATURE")

@@ -29,12 +29,12 @@ def get_uvicorn_log_config():
         "disable_existing_loggers": False,
         "formatters": {
             "default": {
-                "()": "deepagents_cli.logging_config.BeijingFormatter",
+                "()": "backend.utils.logging_config.BeijingFormatter",
                 "fmt": "%(asctime)s | %(levelname)-8s | %(name)s - %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
             "access": {
-                "()": "deepagents_cli.logging_config.BeijingFormatter",
+                "()": "backend.utils.logging_config.BeijingFormatter",
                 "fmt": "%(asctime)s | %(levelname)-8s | %(client_addr)s - \"%(request_line)s\" %(status_code)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },

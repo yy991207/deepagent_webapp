@@ -10,10 +10,10 @@ from typing import Any, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from deepagents_cli.config import settings, create_model
-from deepagents_cli.sessions import get_checkpointer
-from deepagents_cli.tools import fetch_url, http_request, web_search
-from deepagents_cli.agent import create_cli_agent
+from backend.config.deepagents_settings import settings, create_model
+from backend.services.checkpointer_provider import get_checkpointer
+from backend.utils.tools import fetch_url, http_request, web_search
+from backend.services.agent_factory import create_agent
 
 from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
@@ -166,7 +166,7 @@ class ChatStreamService:
                 yield {"type": "tool.start", "id": tool_call_id, "name": "rag_query", "args": {"query": q}}
 
                 try:
-                    from deepagents_cli.rag_middleware import LlamaIndexRagMiddleware
+                    from backend.middleware.rag_middleware import LlamaIndexRagMiddleware
 
                     rag = LlamaIndexRagMiddleware(
                         assistant_id=assistant_id,
@@ -235,7 +235,7 @@ class ChatStreamService:
             - 返回结构用于前端展示引用：包含 index/source/score/text/mongo_id。
             """
             try:
-                from deepagents_cli.rag_middleware import LlamaIndexRagMiddleware
+                from backend.middleware.rag_middleware import LlamaIndexRagMiddleware
 
                 rag = LlamaIndexRagMiddleware(
                     assistant_id=assistant_id,
@@ -301,7 +301,7 @@ class ChatStreamService:
             # 关键逻辑：如果没有拿到 sandbox，则用项目目录作为工作区根目录
             effective_workspace_root = self._sandbox_root if sandbox_backend is not None else self._base_dir
 
-            agent, _backend = create_cli_agent(
+            agent, _backend = create_agent(
                 model=model,
                 assistant_id=assistant_id,
                 tools=[*tools, rag_query, custom_write_file],

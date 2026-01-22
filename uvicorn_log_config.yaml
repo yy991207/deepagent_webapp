@@ -3,10 +3,12 @@ disable_existing_loggers: false
 
 formatters:
   default:
+    '()': backend.utils.logging_config.BeijingFormatter
     format: '%(asctime)s | %(levelname)-8s | %(name)s - %(message)s'
     datefmt: '%Y-%m-%d %H:%M:%S'
   access:
-    format: '%(asctime)s | %(levelname)-8s | %(message)s'
+    '()': backend.utils.logging_config.BeijingFormatter
+    format: '%(asctime)s | %(levelname)-8s | %(client_addr)s - "%(request_line)s" %(status_code)s'
     datefmt: '%Y-%m-%d %H:%M:%S'
 
 handlers:

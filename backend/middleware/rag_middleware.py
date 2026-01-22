@@ -11,7 +11,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 
-from deepagents_cli.config import settings  # 从 pip 安装的包导入
+from backend.config.deepagents_settings import settings
 from backend.database.mongo_manager import get_mongo_manager  # 从本地 backend.database 导入
 
 

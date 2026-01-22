@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from markdownify import markdownify
 
-from deepagents_cli.config import create_model
+from backend.config.deepagents_settings import create_model
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)

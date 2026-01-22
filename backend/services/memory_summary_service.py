@@ -5,7 +5,7 @@ import uuid
 
 from langchain_core.messages import HumanMessage
 
-from deepagents_cli.config import create_model
+from backend.config.deepagents_settings import create_model
 
 from backend.database.mongo_manager import get_mongo_manager
 

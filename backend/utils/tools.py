@@ -7,7 +7,7 @@ import requests
 from markdownify import markdownify
 from tavily import TavilyClient
 
-from deepagents_cli.config import settings
+from backend.config.deepagents_settings import settings
 
 
 logger = logging.getLogger(__name__)

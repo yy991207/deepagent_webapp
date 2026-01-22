@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import aiosqlite
 
-from deepagents_cli.sessions import get_db_path
+from backend.services.checkpointer_provider import get_db_path
 
 
 @dataclass(frozen=True)

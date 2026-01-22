@@ -1,4 +1,9 @@
-"""webapp 内置的 agent 创建逻辑，基于 deepagents SDK。"""
+"""Agent 创建工厂。
+
+说明：
+- 承接原 deepagents_cli.agent 的职责，但归档到 backend/services。
+- 基于 pip 安装的 deepagents SDK 创建 agent，不依赖外部 deepagents-cli 源码。
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ def _build_backend(
     return FilesystemBackend(root_dir=str(workspace_root))
 
 
-def create_cli_agent(
+def create_agent(
     model: str | BaseChatModel,
     assistant_id: str,
     *,
@@ -44,9 +49,10 @@ def create_cli_agent(
     """创建 webapp 运行时的 agent 实例。
 
     说明：
-    - 基于 deepagents SDK 创建，不依赖外部 deepagents-cli 源码
-    - 当前以沙箱 backend 为主，后续可按需扩展 skills/记忆等能力
+    - 当前先满足 webapp 运行所需的最小能力集合
+    - skills/记忆等能力后续按业务再扩展
     """
+
     _ = assistant_id
     _ = sandbox_type
     _ = rag_source_files
@@ -55,6 +61,7 @@ def create_cli_agent(
 
     effective_prompt = extra_system_prompt or system_prompt
     backend = _build_backend(workspace_root=workspace_root, sandbox=sandbox)
+
     # 关键逻辑：统一使用 deepagents.create_deep_agent 构建 agent
     agent = create_deep_agent(
         model=model,
