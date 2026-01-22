@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -26,6 +28,9 @@ logger = logging.getLogger(__name__)
 class ChatStreamService:
     def __init__(self, *, base_dir: Path) -> None:
         self._base_dir = base_dir
+        # 使用 OpenSandbox 远程沙箱
+        self._sandbox_root = Path("/workspace")  # OpenSandbox 默认工作目录
+        logger.info("OpenSandbox mode enabled")
 
     async def stream_chat(
         self,
@@ -35,6 +40,10 @@ class ChatStreamService:
         assistant_id: str = "agent",
         file_refs: list[str] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
+        start_ts = time.monotonic()
+        logger.debug(
+            f"stream_chat start | thread_id={thread_id} | assistant_id={assistant_id} | text_len={len(str(text or ''))}"
+        )
         if file_refs is None:
             file_refs = []
 
@@ -250,7 +259,16 @@ class ChatStreamService:
                 return []
 
         async with get_checkpointer() as checkpointer:
-            model = create_model()
+            try:
+                model = create_model()
+            except Exception as e:
+                err_msg = f"模型初始化失败：{type(e).__name__}: {e}"
+                logger.exception(err_msg)
+                yield {"type": "error", "message": err_msg}
+                yield {"type": "session.status", "status": "done"}
+                return
+
+            logger.debug(f"模型初始化成功 | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}")
             tools = [http_request, fetch_url]
             if settings.has_tavily:
                 tools.append(web_search)
@@ -258,17 +276,44 @@ class ChatStreamService:
             fs_write_service = FilesystemWriteService(session_id=thread_id)
             custom_write_file = fs_write_service.create_write_file_tool()
 
+            # 使用 OpenSandbox 远程沙箱
+            try:
+                from backend.services.opensandbox_backend import get_sandbox_manager
+
+                sandbox_manager = get_sandbox_manager()
+                sandbox_backend = await sandbox_manager.get_or_create_sandbox(
+                    session_id=thread_id,
+                    timeout_seconds=600,  # 10 分钟超时
+                )
+                sandbox_type = "opensandbox"
+                logger.info(f"OpenSandbox backend created for session: {thread_id}, sandbox_id: {sandbox_backend.id}")
+            except Exception as e:
+                err_msg = f"OpenSandbox 创建失败，将自动降级为无沙箱模式：{type(e).__name__}: {e}"
+                logger.exception(err_msg)
+                yield {"type": "sandbox.status", "status": "error", "message": err_msg}
+                sandbox_backend = None
+                sandbox_type = None
+
+            logger.debug(
+                f"sandbox ready | thread_id={thread_id} | has_sandbox={sandbox_backend is not None} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
+            )
+
+            # 关键逻辑：如果没有拿到 sandbox，则用项目目录作为工作区根目录
+            effective_workspace_root = self._sandbox_root if sandbox_backend is not None else self._base_dir
+
             agent, _backend = create_cli_agent(
                 model=model,
                 assistant_id=assistant_id,
                 tools=[*tools, rag_query, custom_write_file],
-                workspace_root=self._base_dir,
+                workspace_root=effective_workspace_root,
+                sandbox=sandbox_backend,
+                sandbox_type=sandbox_type,
                 rag_source_files=[str(x) for x in file_refs] if isinstance(file_refs, list) else None,
                 extra_system_prompt=extra_system_prompt,
                 checkpointer=checkpointer,
                 auto_approve=True,
                 enable_rag=False,
-                enable_shell=False,
+                enable_shell=False,  # OpenSandbox 模式下禁用本地 shell
             )
 
             from backend.utils.snowflake import generate_snowflake_id
@@ -276,6 +321,10 @@ class ChatStreamService:
             
             yield {"type": "session.status", "status": "thinking"}
             yield {"type": "message.start", "message_id": current_message_id}
+
+            logger.debug(
+                f"agent astream begin | thread_id={thread_id} | message_id={current_message_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
+            )
 
             effective_user_text = text
             if forced_rag_refs:
@@ -419,7 +468,6 @@ class ChatStreamService:
                                         )
                                     except Exception:
                                         pass
-
                                     yield {"type": "tool.start", "id": chunk_id, "name": chunk_name, "args": args_value}
                                     started_tools.add(chunk_id)
 
@@ -465,9 +513,14 @@ class ChatStreamService:
                                     started_tools.add(tc_id)
 
             except Exception as exc:
-                yield {"type": "error", "message": str(exc) or "unknown error"}
+                err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
+                logger.exception(err_msg)
+                yield {"type": "error", "message": err_msg}
 
             finally:
+                logger.debug(
+                    f"stream_chat finalize | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)} | assistant_chars={len(''.join(assistant_accum))}"
+                )
                 try:
                     assistant_text = "".join(assistant_accum).strip()
                     suggested_questions: list[str] = []
