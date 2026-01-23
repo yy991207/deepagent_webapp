@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 from backend.config.deepagents_settings import create_model
 
 from backend.database.mongo_manager import get_mongo_manager
+from backend.prompts.memory_summary_prompts import memory_summary_prompt
 
 
 class MemorySummaryService:
@@ -92,17 +93,7 @@ class MemorySummaryService:
                 }
 
             # 关键逻辑：总结框架提示词（中文口语化，方便业务同学维护）
-            prompt = (
-                "你是一名对话记录整理员。下面是一段用户与助手的历史记忆文本。\n"
-                "请把它压缩成一段不超过 500 字的总结，要求：\n"
-                "1) 只保留对后续对话最有用的信息\n"
-                "2) 提炼出用户的核心需求/偏好、发生过的主要事件、已确定的结论或约束\n"
-                "3) 不要出现无意义的客套话，不要逐条复述原文\n"
-                "4) 输出必须是纯文本，不要加标题，不要加编号\n"
-                "5) 总结完成后，请另起一行，输出：\"以上是过往的总结记忆，以下是新的记忆：\"\n\n"
-                "需要总结的内容如下：\n"
-                f"{memory_text.strip()}"
-            )
+            prompt = memory_summary_prompt(memory_text)
 
             model = create_model()
             msg = await model.ainvoke([HumanMessage(content=prompt)])
