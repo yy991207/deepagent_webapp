@@ -29,3 +29,6 @@ requests
 markdownify
 python-dotenv
 pyyaml
+
+# MCP（可选）：用于接入 MCP tools（langchain-mcp-adapters）
+langchain-mcp-adapters

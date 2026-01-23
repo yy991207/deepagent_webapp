@@ -24,9 +24,9 @@ handlers:
 loggers:
   uvicorn:
     handlers: [default]
-    level: DEBUG
+    level: INFO
   uvicorn.error:
-    level: DEBUG
+    level: INFO
   uvicorn.access:
     handlers: [access]
     level: INFO
@@ -34,21 +34,21 @@ loggers:
 
   backend:
     handlers: [default]
-    level: DEBUG
+    level: INFO
     propagate: false
   deepagents:
     handlers: [default]
-    level: DEBUG
+    level: INFO
     propagate: false
   opensandbox:
     handlers: [default]
-    level: DEBUG
+    level: INFO
     propagate: false
   httpx:
     handlers: [default]
-    level: DEBUG
+    level: INFO
     propagate: false
   httpcore:
     handlers: [default]
-    level: DEBUG
+    level: WARNING
     propagate: false

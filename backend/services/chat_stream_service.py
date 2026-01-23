@@ -25,6 +25,7 @@ from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.filesystem_write_service import FilesystemWriteService
+from backend.services.mcp_tool_service import get_mcp_tool_service
 from backend.services.session_cancel_service import get_session_cancel_service
 
 
@@ -251,6 +252,27 @@ class ChatStreamService:
             tools = [http_request, fetch_url]
             if settings.has_tavily:
                 tools.append(web_search)
+
+            # MCP 工具接入（可选）：从 .deepagents/mcp.json 加载并合并到 tools
+            # 说明：
+            # - deepagents 官方推荐通过 langchain-mcp-adapters 把 MCP tools 转成 LangChain tools
+            # - MCP tools 是异步工具，因此这里只能在 async 链路里 await 拉取
+            # - 如果未安装依赖/配置不存在/加载失败，这里会自动降级为不启用 MCP
+            try:
+                mcp_tools = await get_mcp_tool_service().get_tools()
+                if mcp_tools:
+                    tools.extend(mcp_tools)
+                    logger.info(
+                        "MCP tools loaded | thread_id=%s | tools_count=%s",
+                        thread_id,
+                        len(mcp_tools),
+                    )
+            except Exception as _mcp_exc:
+                logger.info(
+                    "MCP tools load skipped | thread_id=%s | err=%s",
+                    thread_id,
+                    str(_mcp_exc),
+                )
 
             fs_write_service = FilesystemWriteService(session_id=thread_id)
             custom_write_file = fs_write_service.create_write_file_tool()
