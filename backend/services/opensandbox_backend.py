@@ -1,6 +1,6 @@
-"""OpenSandbox backend implementation for deepagents.
+"""deepagents 的 OpenSandbox 后端实现。
 
-This module provides a SandboxBackendProtocol implementation using OpenSandbox SDK.
+本模块使用 OpenSandbox SDK 提供 SandboxBackendProtocol 的实现。
 """
 
 from __future__ import annotations
@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def _format_execution(execution) -> tuple[str, int]:
-    """Format execution result into output string and exit code.
+    """格式化执行结果为输出字符串和退出码。
 
-    Args:
-        execution: OpenSandbox execution result object
+    参数：
+        execution: OpenSandbox 执行结果对象
 
-    Returns:
-        Tuple of (output_string, exit_code)
+    返回：
+        (output_string, exit_code) 元组
     """
     stdout = "\n".join(msg.text for msg in execution.logs.stdout) if execution.logs.stdout else ""
     stderr = "\n".join(msg.text for msg in execution.logs.stderr) if execution.logs.stderr else ""
@@ -53,34 +53,35 @@ def _format_execution(execution) -> tuple[str, int]:
 
 
 class OpenSandboxBackend(BaseSandbox):
-    """OpenSandbox backend implementation conforming to SandboxBackendProtocol.
+    """符合 SandboxBackendProtocol 的 OpenSandbox 后端实现。
 
-    This implementation inherits all file operation methods from BaseSandbox
-    and implements the execute() method using OpenSandbox's API.
+    说明：
+    - 继承 BaseSandbox 的所有文件操作方法
+    - 使用 OpenSandbox 的 API 实现 execute() 方法
     """
 
     def __init__(self, sandbox: Sandbox) -> None:
-        """Initialize the OpenSandboxBackend with an OpenSandbox instance.
+        """使用 OpenSandbox 实例初始化 OpenSandboxBackend。
 
-        Args:
-            sandbox: Active OpenSandbox Sandbox instance
+        参数：
+            sandbox: 活动的 OpenSandbox Sandbox 实例
         """
         self._sandbox = sandbox
-        self._timeout = 30 * 60  # 30 minutes default timeout
+        self._timeout = 30 * 60  # 30 分钟默认超时
 
     @property
     def id(self) -> str:
-        """Unique identifier for the sandbox backend."""
+        """沙箱后端的唯一标识符。"""
         return self._sandbox.id
 
     def execute(self, command: str) -> ExecuteResponse:
-        """Execute a command in the sandbox and return ExecuteResponse.
+        """在沙箱中执行命令并返回 ExecuteResponse。
 
-        Args:
-            command: Full shell command string to execute.
+        参数：
+            command: 要执行的完整 shell 命令字符串
 
-        Returns:
-            ExecuteResponse with combined output, exit code, and truncation flag.
+        返回：
+            包含合并输出、退出码和截断标志的 ExecuteResponse
         """
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -92,7 +93,7 @@ class OpenSandboxBackend(BaseSandbox):
             return loop.run_until_complete(self._aexecute(command))
 
     def _execute_sync(self, command: str) -> ExecuteResponse:
-        """Synchronous execution helper using a new event loop."""
+        """使用新事件循环的同步执行辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(self._aexecute(command))
@@ -100,7 +101,7 @@ class OpenSandboxBackend(BaseSandbox):
             loop.close()
 
     async def _aexecute(self, command: str) -> ExecuteResponse:
-        """Async implementation of execute."""
+        """执行方法的异步实现。"""
         try:
             execution = await self._sandbox.commands.run(command)
             output, exit_code = _format_execution(execution)
@@ -119,17 +120,17 @@ class OpenSandboxBackend(BaseSandbox):
             )
 
     async def aexecute(self, command: str) -> ExecuteResponse:
-        """Async version of execute."""
+        """执行方法的异步版本。"""
         return await self._aexecute(command)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Download multiple files from the OpenSandbox.
+        """从 OpenSandbox 下载多个文件。
 
-        Args:
-            paths: List of file paths to download.
+        参数：
+            paths: 要下载的文件路径列表
 
-        Returns:
-            List of FileDownloadResponse objects, one per input path.
+        返回：
+            FileDownloadResponse 对象列表，每个输入路径对应一个
         """
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -141,7 +142,7 @@ class OpenSandboxBackend(BaseSandbox):
             return loop.run_until_complete(self._adownload_files(paths))
 
     def _download_files_sync(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Synchronous download helper using a new event loop."""
+        """使用新事件循环的同步下载辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(self._adownload_files(paths))
@@ -149,7 +150,7 @@ class OpenSandboxBackend(BaseSandbox):
             loop.close()
 
     async def _adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Async implementation of download_files."""
+        """下载文件方法的异步实现。"""
         responses = []
         for path in paths:
             try:
@@ -163,17 +164,17 @@ class OpenSandboxBackend(BaseSandbox):
         return responses
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Async version of download_files."""
+        """下载文件方法的异步版本。"""
         return await self._adownload_files(paths)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Upload multiple files to the OpenSandbox.
+        """上传多个文件到 OpenSandbox。
 
-        Args:
-            files: List of (path, content) tuples to upload.
+        参数：
+            files: 要上传的 (path, content) 元组列表
 
-        Returns:
-            List of FileUploadResponse objects, one per input file.
+        返回：
+            FileUploadResponse 对象列表，每个输入文件对应一个
         """
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -185,7 +186,7 @@ class OpenSandboxBackend(BaseSandbox):
             return loop.run_until_complete(self._aupload_files(files))
 
     def _upload_files_sync(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Synchronous upload helper using a new event loop."""
+        """使用新事件循环的同步上传辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(self._aupload_files(files))
@@ -193,7 +194,7 @@ class OpenSandboxBackend(BaseSandbox):
             loop.close()
 
     async def _aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Async implementation of upload_files."""
+        """上传文件方法的异步实现。"""
         responses = []
         for path, content in files:
             try:
@@ -207,7 +208,7 @@ class OpenSandboxBackend(BaseSandbox):
         return responses
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Async version of upload_files."""
+        """上传文件方法的异步版本。"""
         return await self._aupload_files(files)
 
 
@@ -217,15 +218,15 @@ async def create_opensandbox(
     timeout_seconds: int = 300,
     working_dir: str = "/workspace",
 ) -> Sandbox:
-    """Create a new OpenSandbox instance.
+    """创建一个新的 OpenSandbox 实例。
 
-    Args:
-        image: Docker image to use. Defaults to code-interpreter image.
-        timeout_seconds: Sandbox timeout in seconds. Default 300s (5 minutes).
-        working_dir: Working directory in the sandbox. Default "/workspace".
+    参数：
+        image: 要使用的 Docker 镜像。默认为 code-interpreter 镜像。
+        timeout_seconds: 沙箱超时时间（秒）。默认 300 秒（5 分钟）。
+        working_dir: 沙箱中的工作目录。默认 "/workspace"。
 
-    Returns:
-        Active OpenSandbox Sandbox instance.
+    返回：
+        活动的 OpenSandbox Sandbox 实例
     """
     from opensandbox import Sandbox
     from opensandbox.config import ConnectionConfig
@@ -270,9 +271,10 @@ async def create_opensandbox(
 
 
 class OpenSandboxManager:
-    """Manager for OpenSandbox lifecycle within a session.
+    """会话内 OpenSandbox 生命周期管理器。
 
-    Handles sandbox creation, reuse, and cleanup for chat sessions.
+    说明：
+    - 处理聊天会话的沙箱创建、重用和清理
     """
 
     def __init__(self):
@@ -286,15 +288,15 @@ class OpenSandboxManager:
         image: str | None = None,
         timeout_seconds: int = 300,
     ) -> OpenSandboxBackend:
-        """Get existing sandbox for session or create a new one.
+        """获取会话的现有沙箱或创建新沙箱。
 
-        Args:
-            session_id: Unique session identifier.
-            image: Docker image to use for new sandbox.
-            timeout_seconds: Timeout for new sandbox.
+        参数：
+            session_id: 唯一会话标识符
+            image: 新沙箱使用的 Docker 镜像
+            timeout_seconds: 新沙箱的超时时间
 
-        Returns:
-            OpenSandboxBackend instance for the session.
+        返回：
+            会话的 OpenSandboxBackend 实例
         """
         if session_id in self._backends:
             return self._backends[session_id]
@@ -336,10 +338,10 @@ class OpenSandboxManager:
             mongo.release_distributed_lock(lock_key=lock_key, owner_id=owner_id)
 
     async def cleanup_sandbox(self, session_id: str) -> None:
-        """Cleanup sandbox for a session.
+        """清理会话的沙箱。
 
-        Args:
-            session_id: Session identifier to cleanup.
+        参数：
+            session_id: 要清理的会话标识符
         """
         if session_id in self._sandboxes:
             sandbox = self._sandboxes.pop(session_id)
@@ -352,18 +354,18 @@ class OpenSandboxManager:
                 logger.warning(f"Error cleaning up sandbox for {session_id}: {e}")
 
     async def cleanup_all(self) -> None:
-        """Cleanup all active sandboxes."""
+        """清理所有活动的沙箱。"""
         session_ids = list(self._sandboxes.keys())
         for session_id in session_ids:
             await self.cleanup_sandbox(session_id)
 
 
-# Global sandbox manager instance
+# 全局沙箱管理器实例
 _sandbox_manager: OpenSandboxManager | None = None
 
 
 def get_sandbox_manager() -> OpenSandboxManager:
-    """Get the global sandbox manager instance."""
+    """获取全局沙箱管理器实例。"""
     global _sandbox_manager
     if _sandbox_manager is None:
         _sandbox_manager = OpenSandboxManager()
