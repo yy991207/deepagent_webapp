@@ -1,18 +1,30 @@
+"""聊天流服务 - 负责处理 SSE 流式对话、工具调用、沙箱管理、RAG 检索等核心链路。
+
+本模块职责：
+- 接收用户输入，组装系统提示词（沙箱环境、引用规则、文件写入规则等）
+- 处理附件元数据，进行强制 RAG 检索并生成引用上下文
+- 初始化并管理 OpenSandbox 远程沙箱，同步本地 skills 到沙箱
+- 加载 MCP 工具（可选）、内置工具、自定义工具，创建 deepagents agent
+- 流式处理 agent 输出，解析工具调用事件，持久化工具执行记录
+- 生成推荐问题，保存聊天记录与记忆
+- 支持会话取消、checkpoint 清理等运行时管理
+"""
+
 from __future__ import annotations
 
-import json
 import logging
-import os
 import time
-import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 
 from backend.services.agent_factory import create_agent
+from backend.services.agent_stream_event_service import AgentStreamEventService
 from backend.config.deepagents_settings import create_model, settings
 from backend.services.checkpointer_provider import get_checkpointer
+from backend.services.rag_service import RagService
+from backend.services.skills_sync_service import SkillsSyncService
 from backend.utils.tools import fetch_url, http_request, web_search
 from backend.prompts.chat_prompts import (
     sandbox_environment_prompt,
@@ -21,7 +33,7 @@ from backend.prompts.chat_prompts import (
     suggested_questions_prompt,
 )
 
-from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
+from backend.database.mongo_manager import get_mongo_manager
 from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.filesystem_write_service import FilesystemWriteService
@@ -33,10 +45,21 @@ logger = logging.getLogger(__name__)
 
 
 class ChatStreamService:
+    """聊天流服务类。
+    
+    说明：
+    - 统一管理 SSE 流式对话的完整生命周期
+    - 负责沙箱、工具、RAG、checkpoint 等运行时资源的初始化与清理
+    """
     def __init__(self, *, base_dir: Path) -> None:
+        """初始化聊天流服务。
+        
+        Args:
+            base_dir: 项目根目录，用于定位本地 skills 目录和文件系统 backend
+        """
         self._base_dir = base_dir
-        # 使用 OpenSandbox 远程沙箱
-        self._sandbox_root = Path("/workspace")  # OpenSandbox 默认工作目录
+        # OpenSandbox 远程沙箱的默认工作目录（固定为 /workspace）
+        self._sandbox_root = Path("/workspace")
         logger.info("OpenSandbox mode enabled")
 
     async def stream_chat(
@@ -47,6 +70,28 @@ class ChatStreamService:
         assistant_id: str = "agent",
         file_refs: list[str] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
+        """流式处理聊天对话。
+        
+        说明：
+        - 本方法是 SSE 流式对话的核心入口，负责从用户输入到 AI 流式输出的完整链路
+        - 包括 checkpoint 清理、记忆加载、系统提示词组装、沙箱创建、agent 初始化、流式解析等
+        - 所有异常都会被捕获并转为 SSE 事件，保证前端不会因为服务异常而断流
+        
+        Args:
+            text: 用户输入的对话文本
+            thread_id: 会话唯一标识符（用于 checkpoint、记忆、沙箱等资源的会话级隔离）
+            assistant_id: 助手标识符（用于多租户/多角色场景）
+            file_refs: 附件的 MongoDB 文档 ID 列表（用于 RAG 检索）
+            
+        Yields:
+            SSE 事件字典，包含 type、session_id 等字段，具体类型包括：
+            - session.status: 会话状态（thinking/done/cancelled/error）
+            - tool.start/tool.end: 工具调用开始/结束
+            - rag.references: RAG 检索结果引用
+            - chat.delta: AI 回复文本增量
+            - suggested.questions: 推荐问题
+            - error: 错误信息
+        """
         start_ts = time.monotonic()
         logger.debug(
             f"stream_chat start | thread_id={thread_id} | assistant_id={assistant_id} | text_len={len(str(text or ''))}"
@@ -54,12 +99,14 @@ class ChatStreamService:
         if file_refs is None:
             file_refs = []
 
+        # 清理旧 checkpoint，防止接口首包延迟过高
         try:
             checkpoint_service = CheckpointService()
             await checkpoint_service.cleanup_keep_last(session_id=thread_id)
         except Exception:
             pass
 
+        # 加载会话记忆（用于上下文延续）
         mongo = get_mongo_manager()
         memory_text = ""
         try:
@@ -67,10 +114,11 @@ class ChatStreamService:
         except Exception:
             memory_text = ""
 
+        # 组装系统提示词：沙箱环境指南 + 引用规则 + 文件写入规则
         extra_system_prompt = ""
         attachments_meta: list[dict[str, Any]] = []
 
-        # 组装系统提示词（从 prompts 模块统一管理）
+        # 从 prompts 模块统一管理大段提示词，避免硬编码在业务逻辑里
         parts = [
             sandbox_environment_prompt(),
             reference_rules_prompt(),
@@ -78,6 +126,7 @@ class ChatStreamService:
         ]
         extra_system_prompt = "\n\n".join(parts).strip()
 
+        # 处理附件元数据：将 MongoDB 文档 ID 转为文件名，并生成附件上下文提示词
         if isinstance(file_refs, list):
             for ref in file_refs:
                 mongo_id = str(ref)
@@ -90,6 +139,7 @@ class ChatStreamService:
                     filename = mongo_id
                 attachments_meta.append({"mongo_id": mongo_id, "filename": filename})
 
+        # 如果有附件，在系统提示词中加入附件来源说明和使用规则
         if attachments_meta:
             lines = [
                 "<selected_sources>",
@@ -108,12 +158,14 @@ class ChatStreamService:
             block = "\n".join(lines)
             extra_system_prompt = (extra_system_prompt + "\n\n" + block).strip()
         else:
+            # 无附件时，如果有会话记忆，则加入记忆上下文
             if memory_text.strip():
                 extra_system_prompt = (
                     (extra_system_prompt + "\n\n" + "<chat_memory>\n" + memory_text.strip() + "\n</chat_memory>")
                     .strip()
                 )
 
+        # 保存用户消息到 MongoDB（包含附件元数据）
         chat_service = ChatService()
         chat_service.save_user_message(
             thread_id=thread_id,
@@ -122,123 +174,25 @@ class ChatStreamService:
             attachments=attachments_meta,
         )
 
-        forced_rag_hits: list[dict[str, Any]] = []
-        forced_rag_refs: list[dict[str, Any]] = []
+        # 初始化 RAG 相关变量：用于引用管理（给前端展示 & 最终落库）
         rag_references: list[dict[str, Any]] = []
 
-        if attachments_meta and isinstance(file_refs, list):
-            q = str(text or "").strip()
-            if q:
-                tool_call_id = f"rag-{uuid.uuid4().hex[:8]}"
-                try:
-                    mongo.upsert_tool_message(
-                        thread_id=thread_id,
-                        assistant_id=assistant_id,
-                        tool_call_id=tool_call_id,
-                        tool_name="rag_query",
-                        tool_args={"query": q, "files": [str(x) for x in file_refs]},
-                        tool_status="running",
-                        started_at=get_beijing_time(),
-                    )
-                except Exception:
-                    pass
+        rag_service = RagService(mongo=mongo, base_dir=self._base_dir)
+        rag_prep = await rag_service.force_rag_if_needed(
+            user_text=str(text),
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            file_refs=[str(x) for x in file_refs] if isinstance(file_refs, list) else [],
+            system_prompt=extra_system_prompt,
+        )
+        extra_system_prompt = rag_prep.extra_system_prompt
+        rag_references = rag_prep.rag_references
+        for ev in rag_prep.events:
+            yield ev
 
-                yield {"type": "tool.start", "id": tool_call_id, "name": "rag_query", "args": {"query": q}}
-
-                try:
-                    from backend.middleware.rag_middleware import LlamaIndexRagMiddleware
-
-                    rag = LlamaIndexRagMiddleware(
-                        assistant_id=assistant_id,
-                        workspace_root=self._base_dir,
-                        source_files=[str(x) for x in file_refs],
-                    )
-                    forced_rag_hits = rag.query(q)
-                except Exception:
-                    forced_rag_hits = []
-
-                for i, r in enumerate(forced_rag_hits, start=1):
-                    if not isinstance(r, dict):
-                        continue
-                    forced_rag_refs.append(
-                        {
-                            "index": i,
-                            "source": r.get("source"),
-                            "score": r.get("score"),
-                            "text": r.get("text"),
-                            "mongo_id": r.get("mongo_id"),
-                        }
-                    )
-
-                if forced_rag_refs:
-                    rag_references = forced_rag_refs
-                    yield {"type": "rag.references", "references": forced_rag_refs}
-
-                    ctx_lines = [
-                        "<rag_context>",
-                        "你必须基于以下检索片段回答，并用 [1][2] 形式标注引用：",
-                    ]
-                    for ref in forced_rag_refs[:8]:
-                        src = ref.get("source") or "unknown"
-                        snippet = ref.get("text") or ""
-                        idx = ref.get("index")
-                        ctx_lines.append(f"[{idx}] source={src}\n{snippet}")
-                    ctx_lines.append("</rag_context>")
-                    extra_system_prompt = (extra_system_prompt + "\n\n" + "\n\n".join(ctx_lines)).strip()
-
-                try:
-                    mongo.upsert_tool_message(
-                        thread_id=thread_id,
-                        assistant_id=assistant_id,
-                        tool_call_id=tool_call_id,
-                        tool_name="rag_query",
-                        tool_status="done" if forced_rag_refs else "error",
-                        tool_output=forced_rag_refs if forced_rag_refs else {"error": "no hits"},
-                        ended_at=get_beijing_time(),
-                    )
-                except Exception:
-                    pass
-
-                yield {
-                    "type": "tool.end",
-                    "id": tool_call_id,
-                    "name": "rag_query",
-                    "status": "success" if forced_rag_refs else "error",
-                    "output": forced_rag_refs if forced_rag_refs else {"error": "no hits"},
-                }
-
-        def rag_query(query: str) -> list[dict[str, Any]]:
-            """从当前工作区/已选来源里做语义检索。
-
-            说明：
-            - 该函数会作为 Tool 注入到 agent 中，因此必须提供 docstring。
-            - 返回结构用于前端展示引用：包含 index/source/score/text/mongo_id。
-            """
-            try:
-                from backend.middleware.rag_middleware import LlamaIndexRagMiddleware
-
-                rag = LlamaIndexRagMiddleware(
-                    assistant_id=assistant_id,
-                    workspace_root=self._base_dir,
-                    source_files=[str(x) for x in file_refs] if isinstance(file_refs, list) else None,
-                )
-                hits = rag.query(query)
-                out: list[dict[str, Any]] = []
-                for i, r in enumerate(hits, start=1):
-                    out.append(
-                        {
-                            "index": i,
-                            "source": r.get("source"),
-                            "score": r.get("score"),
-                            "text": r.get("text"),
-                            "mongo_id": r.get("mongo_id"),
-                        }
-                    )
-                return out
-            except Exception:
-                return []
-
+        # 使用 LangGraph checkpointer 进行会话状态持久化
         async with get_checkpointer() as checkpointer:
+            # 初始化模型（如果失败则推送错误事件并结束流）
             try:
                 model = create_model()
             except Exception as e:
@@ -249,14 +203,17 @@ class ChatStreamService:
                 return
 
             logger.debug(f"模型初始化成功 | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}")
+            
+            # 初始化基础工具列表：HTTP 请求、网页抓取
             tools = [http_request, fetch_url]
+            # 如果配置了 Tavily API，则加入网络搜索工具
             if settings.has_tavily:
                 tools.append(web_search)
 
-            # MCP 工具接入（可选）：从 .deepagents/mcp.json 加载并合并到 tools
+            # MCP 工具接入（可选）：从 .deepagents/mcp.json 加载并合并到工具列表
             # 说明：
-            # - deepagents 官方推荐通过 langchain-mcp-adapters 把 MCP tools 转成 LangChain tools
-            # - MCP tools 是异步工具，因此这里只能在 async 链路里 await 拉取
+            # - deepagents 官方推荐通过 langchain-mcp-adapters 把 MCP tools 转为 LangChain tools
+            # - MCP tools 是异步工具，因此只能在 async 链路里 await 拉取
             # - 如果未安装依赖/配置不存在/加载失败，这里会自动降级为不启用 MCP
             try:
                 mcp_tools = await get_mcp_tool_service().get_tools()
@@ -274,10 +231,14 @@ class ChatStreamService:
                     str(_mcp_exc),
                 )
 
+            # 创建自定义文件写入工具（用于将文件内容写入 MongoDB）
             fs_write_service = FilesystemWriteService(session_id=thread_id)
             custom_write_file = fs_write_service.create_write_file_tool()
 
-            # 使用 OpenSandbox 远程沙箱
+            # 创建 OpenSandbox 远程沙箱（如果配置可用）
+            # 说明：沙箱用于执行代码、操作文件系统、运行技能等，提供安全的隔离环境
+            sandbox_backend = None
+            sandbox_type = None
             try:
                 from backend.services.opensandbox_backend import get_sandbox_manager
 
@@ -290,72 +251,15 @@ class ChatStreamService:
                 logger.info(f"OpenSandbox backend created for session: {thread_id}, sandbox_id: {sandbox_backend.id}")
 
                 # 关键逻辑：按 deepagents 官方约定，将本地 skills/skills 下的 SKILL.md 同步到沙箱
-                # 说明：
-                # - deepagents skills sources 约定为 backend 根目录下的 /skills/skills
-                # - 这里仅同步 SKILL.md（最小化），避免一次性拷贝整个目录导致性能和网络开销过大
-                # - 必须使用异步方法（aexecute/aupload_files）避免事件循环绑定问题
-                try:
-                    local_skills_root = self._base_dir / "skills" / "skills"
-                    logger.info(f"skills sync start | session_id={thread_id} | local_skills_root={local_skills_root} | exists={local_skills_root.exists()}")
-                    if local_skills_root.exists():
-                        files_to_upload: list[tuple[str, bytes]] = []
-                        skill_dirs_to_create: list[str] = []
-
-                        for skill_dir in local_skills_root.iterdir():
-                            if not skill_dir.is_dir():
-                                continue
-                            skill_md = skill_dir / "SKILL.md"
-                            if not skill_md.exists():
-                                continue
-                            skill_dirs_to_create.append(skill_dir.name)
-                            remote_path = f"/workspace/skills/skills/{skill_dir.name}/SKILL.md"
-                            files_to_upload.append((remote_path, skill_md.read_bytes()))
-
-                        logger.info(f"skills files prepared | session_id={thread_id} | files_count={len(files_to_upload)} | dirs_count={len(skill_dirs_to_create)}")
-                        if files_to_upload:
-                            # 关键逻辑：确保 skills 根目录和所有子目录存在（一次性执行）
-                            mkdir_cmds = ["mkdir -p /workspace/skills/skills"]
-                            mkdir_cmds.extend([f"mkdir -p /workspace/skills/skills/{name}" for name in skill_dirs_to_create])
-                            mkdir_all_cmd = " && ".join(mkdir_cmds)
-                            try:
-                                mkdir_result = await sandbox_backend.aexecute(mkdir_all_cmd)
-                                logger.info(f"mkdir skills dirs | session_id={thread_id} | exit_code={mkdir_result.exit_code} | dirs_count={len(skill_dirs_to_create)}")
-                                if mkdir_result.exit_code != 0:
-                                    logger.warning(f"mkdir skills dirs non-zero | output={mkdir_result.output}")
-                            except Exception as _mkdir_exc:
-                                logger.warning(f"mkdir skills dirs failed: {type(_mkdir_exc).__name__}: {_mkdir_exc}")
-
-                            # 关键逻辑：上传文件并检查每个文件的上传结果（使用异步方法）
-                            upload_responses = await sandbox_backend.aupload_files(files_to_upload)
-
-                            # 详细记录每个文件的上传状态
-                            success_count = 0
-                            error_count = 0
-                            for resp in upload_responses:
-                                if resp.error:
-                                    error_count += 1
-                                    logger.error(f"skill upload FAILED | session_id={thread_id} | path={resp.path} | error={resp.error}")
-                                else:
-                                    success_count += 1
-                                    logger.debug(f"skill upload OK | session_id={thread_id} | path={resp.path}")
-
-                            logger.info(f"skills upload summary | session_id={thread_id} | success={success_count} | failed={error_count} | total={len(upload_responses)}")
-
-                            # 关键逻辑：同步后做一次目录自检
-                            try:
-                                check = await sandbox_backend.aexecute("ls -la /workspace/skills/skills || true")
-                                logger.info(f"sandbox skills dir check | session_id={thread_id} | {check.output}")
-
-                                # 额外检查：抽一个 skill 子目录验证 SKILL.md 是否存在
-                                if files_to_upload:
-                                    sample_path = files_to_upload[0][0]
-                                    head_check = await sandbox_backend.aexecute(f"head -n 5 {sample_path} 2>&1 || echo 'FILE_NOT_FOUND'")
-                                    logger.info(f"skill file sample check | session_id={thread_id} | path={sample_path} | output={head_check.output[:200]}")
-                            except Exception as _check_exc:
-                                logger.warning(f"sandbox skills dir check failed: {type(_check_exc).__name__}: {_check_exc}")
-                except Exception as _sync_exc:
-                    logger.warning(f"sync skills to sandbox failed: {type(_sync_exc).__name__}: {_sync_exc}")
+                skills_sync_service = SkillsSyncService(base_dir=self._base_dir)
+                skills_sync_result = await skills_sync_service.sync_skills_to_sandbox(
+                    sandbox_backend=sandbox_backend,
+                    session_id=thread_id,
+                )
+                for ev in skills_sync_result.events:
+                    yield ev
             except Exception as e:
+                # 沙箱创建失败时自动降级为无沙箱模式，保证主链路可用
                 err_msg = f"OpenSandbox 创建失败，将自动降级为无沙箱模式：{type(e).__name__}: {e}"
                 logger.exception(err_msg)
                 yield {"type": "sandbox.status", "status": "error", "message": err_msg}
@@ -366,13 +270,14 @@ class ChatStreamService:
                 f"sandbox ready | thread_id={thread_id} | has_sandbox={sandbox_backend is not None} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
             )
 
-            # 关键逻辑：如果没有拿到 sandbox，则用项目目录作为工作区根目录
+            # 关键逻辑：如果没有拿到沙箱，则用项目目录作为工作区根目录
             effective_workspace_root = self._sandbox_root if sandbox_backend is not None else self._base_dir
 
+            # 创建 deepagents agent（通过工厂方法统一处理 backend、skills、工具等）
             agent, _backend = create_agent(
                 model=model,
                 assistant_id=assistant_id,
-                tools=[*tools, rag_query, custom_write_file],
+                tools=[*tools, rag_prep.rag_tool, custom_write_file],
                 workspace_root=effective_workspace_root,
                 sandbox=sandbox_backend,
                 sandbox_type=sandbox_type,
@@ -394,27 +299,29 @@ class ChatStreamService:
                 f"agent astream begin | thread_id={thread_id} | message_id={current_message_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
             )
 
+            # 构建有效的用户文本（如果有强制 RAG 引用，则加入引用上下文）
             effective_user_text = text
-            if forced_rag_refs:
+            if rag_references:
                 ctx_lines = [
                     "请只基于下面的附件检索片段完成总结，禁止引入其它记忆/常识内容，且必须用 [1][2] 标注引用：",
                 ]
-                for ref in forced_rag_refs[:8]:
+                for ref in rag_references[:8]:
                     src = ref.get("source") or "unknown"
                     snippet = ref.get("text") or ""
                     idx = ref.get("index")
                     ctx_lines.append(f"[{idx}] source={src}\n{snippet}")
                 effective_user_text = (str(text or "").strip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
 
+            # 准备流式输入和状态变量
             stream_input = {"messages": [HumanMessage(content=effective_user_text)]}
             assistant_accum: list[str] = []
-            started_tools: set[str] = set()
-            active_tool_ids: set[str] = set()
-            pending_text_deltas: list[str] = []
-            saw_tool_call = False
+            stream_event_service = AgentStreamEventService(mongo=mongo)
+            stream_state = stream_event_service.init_state()
 
+            # 获取会话取消服务，用于支持中断流式生成
             cancel_service = get_session_cancel_service()
             
+            # 开始流式处理 agent 输出
             try:
                 async for chunk in agent.astream(
                     stream_input,
@@ -428,157 +335,18 @@ class ChatStreamService:
                         yield {"type": "session.status", "status": "cancelled"}
                         break
                     
-                    if not isinstance(chunk, tuple) or len(chunk) != 3:
-                        continue
-                    _namespace, mode, data = chunk
-
-                    if mode != "messages":
-                        continue
-
-                    if isinstance(data, list) and data:
-                        message, _metadata = data[-1], {}
-                    elif isinstance(data, tuple) and len(data) == 2:
-                        message, _metadata = data
-                    else:
-                        continue
-
-                    if isinstance(message, ToolMessage):
-                        tool_id = getattr(message, "tool_call_id", None)
-                        tool_name = getattr(message, "name", "")
-
-                        if tool_name == "rag_query":
-                            try:
-                                raw_content = message.content
-                                if isinstance(raw_content, str):
-                                    parsed = json.loads(raw_content)
-                                else:
-                                    parsed = raw_content
-                                if isinstance(parsed, list):
-                                    rag_references = [x for x in parsed if isinstance(x, dict)]
-                                    yield {"type": "rag.references", "references": rag_references}
-                            except Exception:
-                                pass
-
-                        if tool_id:
-                            try:
-                                tool_id_str = str(tool_id)
-                                if tool_id_str in active_tool_ids:
-                                    active_tool_ids.discard(tool_id_str)
-
-                                mongo.upsert_tool_message(
-                                    thread_id=thread_id,
-                                    assistant_id=assistant_id,
-                                    tool_call_id=tool_id_str,
-                                    tool_name=tool_name,
-                                    tool_status=str(getattr(message, "status", "success")),
-                                    tool_output=message.content,
-                                    ended_at=get_beijing_time(),
-                                )
-                            except Exception:
-                                pass
-
-                            tool_end_event = {
-                                "type": "tool.end",
-                                "id": tool_id,
-                                "name": tool_name,
-                                "status": getattr(message, "status", "success"),
-                                "output": message.content,
-                                "message_id": current_message_id,
-                            }
-                            yield tool_end_event
-
-                            if saw_tool_call and not active_tool_ids and pending_text_deltas:
-                                for delta in pending_text_deltas:
-                                    assistant_accum.append(str(delta))
-                                    yield {"type": "chat.delta", "text": delta}
-                                pending_text_deltas = []
-                        continue
-
-                    if not hasattr(message, "content_blocks") and not hasattr(message, "content"):
-                        continue
-
-                    if hasattr(message, "content_blocks") and message.content_blocks:
-                        for block in message.content_blocks:
-                            block_type = block.get("type")
-                            if block_type == "text":
-                                text_delta = block.get("text", "")
-                                if text_delta:
-                                    if saw_tool_call and active_tool_ids:
-                                        pending_text_deltas.append(str(text_delta))
-                                    else:
-                                        assistant_accum.append(str(text_delta))
-                                        yield {"type": "chat.delta", "text": text_delta}
-                            elif block_type in ("tool_call_chunk", "tool_call"):
-                                chunk_name = block.get("name")
-                                chunk_id = block.get("id")
-                                chunk_args = block.get("args")
-
-                                if chunk_id and chunk_id not in started_tools and chunk_name:
-                                    args_value = chunk_args
-                                    if isinstance(args_value, str):
-                                        try:
-                                            args_value = json.loads(args_value)
-                                        except json.JSONDecodeError:
-                                            args_value = {"value": args_value}
-
-                                    saw_tool_call = True
-                                    try:
-                                        tool_id_str = str(chunk_id)
-                                        active_tool_ids.add(tool_id_str)
-                                        mongo.upsert_tool_message(
-                                            thread_id=thread_id,
-                                            assistant_id=assistant_id,
-                                            tool_call_id=tool_id_str,
-                                            tool_name=str(chunk_name),
-                                            tool_args=args_value,
-                                            tool_status="running",
-                                            started_at=get_beijing_time(),
-                                        )
-                                    except Exception:
-                                        pass
-                                    yield {"type": "tool.start", "id": chunk_id, "name": chunk_name, "args": args_value}
-                                    started_tools.add(chunk_id)
-
-                    elif hasattr(message, "content"):
-                        if isinstance(message.content, str) and message.content:
-                            text_delta = message.content
-                            if saw_tool_call and active_tool_ids:
-                                pending_text_deltas.append(str(text_delta))
-                            else:
-                                assistant_accum.append(str(text_delta))
-                                yield {"type": "chat.delta", "text": text_delta}
-
-                        if hasattr(message, "tool_calls") and message.tool_calls:
-                            for tc in message.tool_calls:
-                                tc_id = tc.get("id")
-                                tc_name = tc.get("name")
-                                tc_args = tc.get("args")
-
-                                if tc_id and tc_id not in started_tools and tc_name:
-                                    args_value = tc_args
-                                    if isinstance(args_value, str):
-                                        try:
-                                            args_value = json.loads(args_value)
-                                        except json.JSONDecodeError:
-                                            args_value = {"value": args_value}
-
-                                    saw_tool_call = True
-                                    try:
-                                        active_tool_ids.add(str(tc_id))
-                                        mongo.upsert_tool_message(
-                                            thread_id=thread_id,
-                                            assistant_id=assistant_id,
-                                            tool_call_id=str(tc_id),
-                                            tool_name=str(tc_name),
-                                            tool_args=args_value,
-                                            tool_status="running",
-                                            started_at=get_beijing_time(),
-                                        )
-                                    except Exception:
-                                        pass
-
-                                    yield {"type": "tool.start", "id": tc_id, "name": tc_name, "args": args_value}
-                                    started_tools.add(tc_id)
+                    parsed = stream_event_service.parse_chunk(
+                        chunk=chunk,
+                        state=stream_state,
+                        thread_id=thread_id,
+                        assistant_id=assistant_id,
+                        current_message_id=current_message_id,
+                        rag_references_out=rag_references,
+                    )
+                    for ev in parsed.events:
+                        yield ev
+                    for delta in parsed.assistant_deltas:
+                        assistant_accum.append(str(delta))
 
             except Exception as exc:
                 err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
