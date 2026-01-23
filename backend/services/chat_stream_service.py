@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from backend.services.agent_factory import create_agent
+from backend.config.deepagents_settings import create_model, settings
 from backend.services.checkpointer_provider import get_checkpointer
 from backend.utils.tools import fetch_url, http_request, web_search
 from backend.prompts.chat_prompts import (
