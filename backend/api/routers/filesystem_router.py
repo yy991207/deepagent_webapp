@@ -109,7 +109,12 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
     说明：
     - 前端点击下载按钮时调用
     - 返回文件流，浏览器自动下载
+    - 支持文本文件（md, txt, json 等）和二进制文件（pdf, docx, pptx, xlsx 等）
+    - 二进制文件内容以 Base64 编码存储，下载时自动解码
     """
+    import base64
+    import os
+
     mongo = get_mongo_manager()
 
     if not session_id.strip():
@@ -125,20 +130,64 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
 
     content = write.get("content", "")
     file_path = write.get("file_path", "")
-    
+    metadata = write.get("metadata", {})
+    file_type = metadata.get("type", "").lower()
+
     # 从 file_path 提取文件名
-    import os
-    filename = os.path.basename(file_path) if file_path else "document.md"
-    
+    filename = os.path.basename(file_path) if file_path else "document"
+
+    # 二进制文件类型映射
+    BINARY_TYPES = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "zip": "application/zip",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+    }
+
+    # 文本文件类型映射
+    TEXT_TYPES = {
+        "md": "text/markdown",
+        "txt": "text/plain",
+        "json": "application/json",
+        "html": "text/html",
+        "css": "text/css",
+        "js": "application/javascript",
+        "py": "text/x-python",
+        "xml": "application/xml",
+        "csv": "text/csv",
+    }
+
+    # 确定 media_type 和是否需要 Base64 解码
+    if file_type in BINARY_TYPES:
+        media_type = BINARY_TYPES[file_type]
+        try:
+            # 二进制文件：Base64 解码
+            content_bytes = base64.b64decode(content)
+        except Exception:
+            # 如果解码失败，尝试直接使用原始内容
+            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    elif file_type in TEXT_TYPES:
+        media_type = TEXT_TYPES[file_type]
+        content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    else:
+        # 默认按文本处理
+        media_type = "application/octet-stream"
+        content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+
     # 确保文件名有正确的扩展名
-    if not filename.endswith(".md"):
-        filename = f"{filename}.md"
+    if file_type and not filename.endswith(f".{file_type}"):
+        filename = f"{filename}.{file_type}"
 
     return Response(
-        content=content.encode("utf-8"),
-        media_type="text/markdown",
+        content=content_bytes,
+        media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Type": "text/markdown; charset=utf-8"
+            "Content-Type": media_type,
         }
     )
