@@ -22,15 +22,35 @@ def _append_to_system_message(
     system_message: SystemMessage | None,
     text: str,
 ) -> SystemMessage:
+    """向系统消息追加文本，保持原有结构不变。
+    
+    Args:
+        system_message: 原始系统消息，可能为 None
+        text: 要追加的文本内容
+        
+    Returns:
+        追加文本后的新 SystemMessage
+    """
+    # 获取原有内容块，如果为空则初始化为空列表
     new_content: list[str | dict[str, str]] = list(system_message.content_blocks) if system_message else []
+    # 如果已有内容，追加时先加两个换行符
     if new_content:
         text = f"\n\n{text}"
+    # 追加新的文本块
     new_content.append({"type": "text", "text": text})
     return SystemMessage(content=new_content)
 
 
 @dataclass(frozen=True)
 class RagDocument:
+    """RAG 文档元数据，用于检测文件变更和索引重建。
+    
+    Attributes:
+        key: 文档唯一标识（文件路径或 mongo_id）
+        sha256: 文件内容的 SHA256 哈希值，用于检测内容变更
+        size: 文件大小，用于辅助检测变更
+        filename: 文件名，用于展示和日志
+    """
     key: str
     sha256: str
     size: int
@@ -38,15 +58,25 @@ class RagDocument:
 
 
 class _FileLock:
+    """基于 fcntl 的文件锁，用于保护 RAG 索引构建过程的并发安全。
+    
+    说明：
+    - 使用上下文管理器协议，支持 with 语句
+    - 自动创建锁文件的父目录
+    - 使用排他锁（LOCK_EX），确保同一时间只有一个进程能构建索引
+    """
     def __init__(self, lock_path: Path) -> None:
         self._lock_path = lock_path
         self._fh: Any | None = None
 
     def __enter__(self) -> "_FileLock":
+        # 确保锁文件的父目录存在
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # 以追加模式打开文件，获取文件描述符
         self._fh = open(self._lock_path, "a+")
         import fcntl
 
+        # 对文件描述符施加排他锁，会阻塞直到获取锁
         fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         return self
 
@@ -56,15 +86,31 @@ class _FileLock:
         import fcntl
 
         try:
+            # 释放文件锁
             fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         finally:
             try:
+                # 关闭文件句柄
                 self._fh.close()
             finally:
                 self._fh = None
 
 
 class LlamaIndexRagMiddleware(AgentMiddleware):
+    """基于 LlamaIndex 的 RAG 中间件，为 Agent 提供语义检索能力。
+    
+    功能说明：
+    - 支持本地文件系统和工作区文件的语义检索
+    - 支持 MongoDB 存储的文档检索
+    - 自动构建和更新向量索引，基于文件变更检测
+    - 支持多种嵌入模型（DashScope、OpenAI、HuggingFace）
+    - 将检索结果注入到系统消息中，支持引用标记
+    
+    使用场景：
+    - 当用户上传文件并提问时，从文件内容中检索相关信息
+    - 当用户询问工作区相关问题时，从工作区文件中检索答案
+    - 支持代码、文档、配置文件等多种文件类型的语义检索
+    """
     def __init__(
         self,
         *,
@@ -79,74 +125,124 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         super().__init__()
         self._assistant_id = assistant_id
         self._workspace_root = workspace_root
-        self._source_files = source_files
-        self._top_k = top_k
-        self._max_files = max_files
-        self._include_exts = include_exts
+        self._source_files = source_files  # 指定的源文件列表（可以是本地路径或 mongo_id）
+        self._top_k = top_k  # 检索返回的最大结果数
+        self._max_files = max_files  # 最大处理文件数，防止内存溢出
+        self._include_exts = include_exts  # 支持的文件扩展名
 
+        # 确定索引持久化目录：每个 assistant 有独立的 RAG 索引存储空间
         agent_dir = settings.ensure_agent_dir(assistant_id)
         if persist_dir is None:
+            # 如果指定了源文件列表，基于文件列表生成稳定的目录名
             if source_files:
                 stable = "\n".join(sorted(source_files))
                 digest = hashlib.sha256(stable.encode("utf-8")).hexdigest()[:16]
                 self._persist_dir = agent_dir / "rag" / "indexes" / digest
             else:
+                # 否则使用默认的通用索引目录
                 self._persist_dir = agent_dir / "rag" / "index"
         else:
             self._persist_dir = persist_dir
+        
+        # 索引元数据文件路径，记录文件变更信息
         self._manifest_path = self._persist_dir / "manifest.json"
+        # 文件锁路径，保护索引构建过程
         self._lock_path = self._persist_dir / ".lock"
 
     def _resolve_selected_files(self) -> list[Path] | None:
+        """解析指定的源文件列表，返回有效的本地文件路径。
+        
+        处理逻辑：
+        - 跳过 24 位字符串（视为 MongoDB ObjectId）
+        - 将相对路径转换为基于工作区的绝对路径
+        - 检查文件是否存在、是否在允许的扩展名范围内
+        - 只返回在工作区范围内的文件，防止路径遍历攻击
+        
+        Returns:
+            有效的本地文件路径列表，如果没有指定文件则返回 None
+        """
         if not self._source_files:
             return None
         results: list[Path] = []
         for raw in self._source_files:
-            # Mongo mode: treat raw as mongo ObjectId string
+            # 跳过 MongoDB ObjectId（24位十六进制字符串）
             if isinstance(raw, str) and len(raw) == 24:
                 continue
             try:
+                # 解析路径，支持用户目录展开
                 p = Path(raw).expanduser()
                 if not p.is_absolute():
+                    # 相对路径基于工作区根目录
                     p = (self._workspace_root / p).resolve()
                 else:
                     p = p.resolve()
             except Exception:
                 continue
+            # 安全检查：确保文件在工作区范围内
             if self._workspace_root not in p.parents and p != self._workspace_root:
                 continue
+            # 检查文件存在性和类型
             if not p.exists() or not p.is_file():
                 continue
+            # 检查文件扩展名是否在支持范围内
             if p.suffix.lower() not in self._include_exts:
                 continue
             results.append(p)
         return results
 
     def _iter_mongo_documents(self) -> list[dict[str, Any]] | None:
+        """从 MongoDB 获取指定文档列表，用于 RAG 检索。
+        
+        处理逻辑：
+        - 从 source_files 中筛选出 24 位字符串（MongoDB ObjectId）
+        - 从 MongoDB 获取文档的元数据和二进制内容
+        - 根据文件扩展名过滤文档类型
+        - 限制最大文档数量，防止内存溢出
+        
+        Returns:
+            MongoDB 文档列表，每个文档包含 id/meta/bytes 字段；如果没有指定文档则返回 None
+        """
         if not self._source_files:
             return None
+        # 筛选出 MongoDB ObjectId（24位十六进制字符串）
         ids = [x for x in self._source_files if isinstance(x, str) and len(x) == 24]
         if not ids:
             return None
 
         mongo = get_mongo_manager()
         docs: list[dict[str, Any]] = []
+        # 限制最大文档数量，防止内存溢出
         for doc_id in ids[: self._max_files]:
+            # 获取文档的元数据和二进制内容
             item = mongo.get_document_bytes(doc_id=doc_id)
             if not item:
                 continue
             meta, raw = item
             filename = str(meta.get("filename") or "")
+            # 根据文件扩展名过滤文档类型
             if filename and Path(filename).suffix.lower() not in self._include_exts:
                 continue
             docs.append({"id": doc_id, "meta": meta, "bytes": raw})
         return docs
 
     def _iter_source_files(self) -> list[Path]:
+        """遍历工作区文件，返回符合条件的文件路径列表。
+        
+        处理逻辑：
+        - 如果有指定文件列表，优先使用解析后的文件
+        - 否则递归遍历工作区，排除常见的忽略目录
+        - 只返回指定扩展名的文件
+        - 限制最大文件数量，防止内存溢出
+        
+        Returns:
+            符合条件的文件路径列表
+        """
+        # 如果有指定文件列表，优先使用
         selected = self._resolve_selected_files()
         if selected is not None:
             return selected[: self._max_files]
 
+        # 常见的忽略目录，避免索引不必要的文件
         ignore_dirs = {
             ".git",
             ".venv",
@@ -160,23 +256,39 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             "build",
         }
         results: list[Path] = []
+        # 递归遍历工作区
         for path in self._workspace_root.rglob("*"):
             if len(results) >= self._max_files:
                 break
             if path.is_dir():
                 continue
+            # 跳过忽略目录中的文件
             if any(part in ignore_dirs for part in path.parts):
                 continue
+            # 只处理指定扩展名的文件
             if path.suffix.lower() not in self._include_exts:
                 continue
             results.append(path)
         return results
 
     def query(self, query: str) -> list[dict[str, Any]]:
+        """执行 RAG 查询，返回相关的文档片段。
+        
+        Args:
+            query: 查询文本
+            
+        Returns:
+            相关文档片段列表，每个片段包含 text/score/source/mongo_id 字段
+        """
         self._ensure_index()
         return self._retrieve(query)
 
     def _load_manifest(self) -> dict[str, RagDocument]:
+        """加载索引元数据文件，用于检测文件变更。
+        
+        Returns:
+            文档元数据字典，key 为文件路径，value 为 RagDocument 对象
+        """
         if not self._manifest_path.exists():
             return {}
         try:
@@ -197,6 +309,11 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         return docs
 
     def _write_manifest(self, docs: list[RagDocument]) -> None:
+        """写入索引元数据文件，记录当前索引的文件信息。
+        
+        Args:
+            docs: 文档元数据列表
+        """
         payload = {
             "workspace_root": str(self._workspace_root),
             "documents": [
@@ -204,17 +321,32 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 for d in sorted(docs, key=lambda x: x.key)
             ],
         }
+        # 确保目录存在
         self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        # 写入 JSON 文件，保持中文可读性
         self._manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
     def _compute_fs_manifest(self, files: list[Path]) -> list[RagDocument]:
+        """计算文件系统文件的元数据，用于检测变更。
+        
+        说明：
+        - 对于文件系统文件，使用修改时间（mtime）和文件大小来近似检测变更
+        - 不计算 SHA256 哈希，因为性能开销较大
+        - sha256 字段使用 "mtime:<timestamp>" 格式
+        
+        Args:
+            files: 文件路径列表
+            
+        Returns:
+            文档元数据列表
+        """
         docs: list[RagDocument] = []
         for p in files:
             try:
                 stat = p.stat()
             except OSError:
                 continue
-            # fs uses mtime+size to approximate change; sha256 left empty
+            # 使用 mtime+size 来近似检测文件变更，避免计算 SHA256 的性能开销
             docs.append(
                 RagDocument(
                     key=str(p),
@@ -226,6 +358,18 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         return docs
 
     def _compute_mongo_manifest(self, docs: list[dict[str, Any]]) -> list[RagDocument]:
+        """计算 MongoDB 文档的元数据，用于检测变更。
+        
+        说明：
+        - 对于 MongoDB 文档，使用存储的 SHA256 哈希值来检测内容变更
+        - 元数据中包含文件名、大小、哈希值等信息
+        
+        Args:
+            docs: MongoDB 文档列表，每个文档包含 id/meta/bytes 字段
+            
+        Returns:
+            文档元数据列表
+        """
         out: list[RagDocument] = []
         for d in docs:
             meta = d.get("meta") or {}
@@ -240,6 +384,20 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         return out
 
     def _is_manifest_changed(self, existing: dict[str, RagDocument], current: list[RagDocument]) -> bool:
+        """检查文件元数据是否发生变更，判断是否需要重建索引。
+        
+        检查逻辑：
+        - 比较文档数量
+        - 比较每个文档的 SHA256 哈希值和文件大小
+        - 如果有新增、删除或变更的文件，则需要重建索引
+        
+        Args:
+            existing: 现有的文档元数据字典
+            current: 当前计算的文档元数据列表
+            
+        Returns:
+            True 表示需要重建索引，False 表示无需重建
+        """
         if not existing and not current:
             return False
         if len(existing) != len(current):
@@ -248,14 +406,31 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             prev = existing.get(d.key)
             if prev is None:
                 return True
+            # 检查 SHA256 哈希值和文件大小是否变更
             if prev.sha256 != d.sha256 or prev.size != d.size:
                 return True
         return False
 
     def _configure_llamaindex_embeddings(self) -> None:
+        """配置 LlamaIndex 的嵌入模型，支持多种提供商。
+        
+        支持的提供商：
+        - dashscope: 阿里云 DashScope 嵌入服务（默认）
+        - openai: OpenAI 嵌入服务
+        - hf: HuggingFace 本地嵌入模型
+        
+        兜底机制：
+        - 如果指定的提供商初始化失败，自动降级到 HuggingFace
+        - 如果 HuggingFace 也失败，则不设置嵌入模型
+        """
         provider = (os.environ.get("RAG_EMBEDDING_PROVIDER") or "dashscope").strip().lower()
 
         def _try_set_hf() -> bool:
+            """尝试设置 HuggingFace 嵌入模型作为兜底方案。
+            
+            Returns:
+                True 表示设置成功，False 表示失败
+            """
             try:
                 from llama_index.core import Settings as LlamaIndexSettings
                 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -338,6 +513,15 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             return
 
     def _ensure_index(self) -> None:
+        """确保 RAG 索引存在且最新，如果不存在或文件已变更则重建索引。
+        
+        处理流程：
+        1. 配置嵌入模型
+        2. 使用文件锁保护并发构建
+        3. 获取当前文件列表（MongoDB 或本地文件系统）
+        4. 比较文件变更，判断是否需要重建
+        5. 如需重建，则构建新的向量索引
+        """
         try:
             from llama_index.core import StorageContext, VectorStoreIndex
             from llama_index.core import load_index_from_storage
@@ -347,6 +531,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
 
         self._configure_llamaindex_embeddings()
 
+        # 使用文件锁保护并发构建过程
         with _FileLock(self._lock_path):
             mongo_docs = self._iter_mongo_documents()
             if mongo_docs is not None:
@@ -357,10 +542,12 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 current_docs = self._compute_fs_manifest(files)
             existing = self._load_manifest()
 
+            # 检查索引文件是否存在
             index_exists = (self._persist_dir / "docstore.json").exists() or (
                 self._persist_dir / "index_store.json"
             ).exists()
 
+            # 检查索引是否需要重建：索引文件存在且文件未变更时跳过
             if index_exists and not self._is_manifest_changed(existing, current_docs):
                 logger.info(
                     "RAG index up-to-date. persist_dir=%s files=%s",
@@ -369,6 +556,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 )
                 return
 
+            # 确保索引目录存在
             self._persist_dir.mkdir(parents=True, exist_ok=True)
 
             logger.info(
@@ -377,6 +565,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 len(current_docs),
             )
 
+            # 尝试加载现有索引（如果存在）
             if index_exists:
                 try:
                     storage_context = StorageContext.from_defaults(persist_dir=str(self._persist_dir))
@@ -384,8 +573,10 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 except Exception:
                     pass
 
+            # 构建新的向量索引
             try:
                 if mongo_docs is not None:
+                    # 处理 MongoDB 文档：将二进制内容转换为 LlamaIndex Document
                     docs: list[Document] = []
                     for d in mongo_docs:
                         meta = d.get("meta") or {}
@@ -403,29 +594,37 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                         )
                     index = VectorStoreIndex.from_documents(docs)
                 else:
+                    # 处理本地文件系统：使用 SimpleDirectoryReader 读取文件
                     from llama_index.core import SimpleDirectoryReader
 
                     documents = SimpleDirectoryReader(input_files=[str(p) for p in files]).load_data()
                     index = VectorStoreIndex.from_documents(documents)
+                
+                # 持久化索引并更新元数据
                 index.storage_context.persist(persist_dir=str(self._persist_dir))
                 self._write_manifest(current_docs)
                 logger.info("RAG index built. persist_dir=%s", str(self._persist_dir))
             except Exception:
-                logger.exception("RAG index build failed. persist_dir=%s", str(self._persist_dir))
-                return
-
-    def ensure_index(self) -> None:
-        self._ensure_index()
+                logger.exception(
+                    "RAG index build failed. persist_dir=%s",
+                    str(self._persist_dir),
+                )
+                # 清理损坏的索引文件，避免下次加载失败
+                try:
+                    import shutil
+                    shutil.rmtree(self._persist_dir)
+                except Exception:
+                    pass
 
     def _retrieve(self, query: str) -> list[dict[str, Any]]:
-        try:
-            from llama_index.core import StorageContext
-            from llama_index.core import load_index_from_storage
-        except Exception:
-            return []
+        """执行向量检索，返回相关的文档片段。
 
-        self._configure_llamaindex_embeddings()
+        Args:
+            query: 查询文本
 
+        Returns:
+            相关文档片段列表，每个片段包含 text/score/source/mongo_id 字段
+        """
         try:
             storage_context = StorageContext.from_defaults(persist_dir=str(self._persist_dir))
             index = load_index_from_storage(storage_context)
@@ -442,6 +641,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             len(query or ""),
         )
 
+        # 将检索结果转换为统一格式
         results: list[dict[str, Any]] = []
         for n in nodes:
             try:
@@ -460,7 +660,9 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 )
             except Exception:
                 continue
+        
         logger.info("RAG hits=%s", len(results))
+        # 记录前 20 个检索结果的详细信息，便于调试
         for i, r in enumerate(results[: min(len(results), 20)], start=1):
             logger.info(
                 "RAG hit #%s source=%s score=%s text_len=%s",
@@ -476,8 +678,27 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Any,
     ) -> ModelResponse:
+        """Agent 中间件的核心方法：在模型调用前注入 RAG 检索结果。
+        
+        处理流程：
+        1. 确保 RAG 索引存在且最新
+        2. 从用户消息中提取查询文本
+        3. 执行向量检索获取相关文档片段
+        4. 将检索结果格式化为引用上下文
+        5. 将上下文注入到系统消息中
+        6. 调用下一个处理器（通常是模型调用）
+        
+        Args:
+            request: 模型请求对象，包含消息和系统提示
+            handler: 下一个处理器（通常是模型调用）
+            
+        Returns:
+            包含 RAG 上下文的模型响应
+        """
+        # 确保索引存在且最新
         self._ensure_index()
 
+        # 从用户消息中提取查询文本
         query = ""
         try:
             if request.messages:
@@ -488,13 +709,16 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         except Exception:
             query = ""
 
+        # 如果没有查询内容，直接调用下一个处理器
         if not query.strip():
             return await handler(request)
 
+        # 执行 RAG 检索
         rag_hits = self._retrieve(query)
         if not rag_hits:
             return await handler(request)
 
+        # 格式化检索结果为引用上下文
         rag_text_parts = [
             "<rag_context>",
             "You must cite sources in your answer using square-bracket references like [1], [2].",
@@ -508,6 +732,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         rag_text_parts.append("</rag_context>")
         rag_text = "\n\n".join(rag_text_parts)
 
+        # 将 RAG 上下文注入到系统消息中
         new_system = _append_to_system_message(request.system_message, rag_text)
         try:
             blocks = list(new_system.content_blocks)
@@ -519,6 +744,7 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         except Exception:
             pass
 
+        # 调用下一个处理器，传入修改后的系统消息
         return await handler(request.override(system_message=new_system))
 
 
