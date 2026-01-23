@@ -103,6 +103,36 @@
  - `DEEPAGENTS_LOCKS_COLLECTION`
  - `PODCAST_TTS_PROVIDER`：比如 `edge`/`openai-compatible`
  - `PODCAST_TTS_MODEL`
+
+### MCP（可选）
+- `DEEPAGENTS_MCP_ENABLED`：是否启用 MCP（默认启用，设为 `0/false/no/off` 禁用）
+
+#### MCP 配置文件
+- **位置**：`.deepagents/mcp.json`
+- **格式**：
+  ```json
+  {
+    "mcpServers": {
+      "server_name": {
+        "transport": "stdio|sse|websocket|http",
+        "command": "...",
+        "args": ["..."]
+      }
+    }
+  }
+- **示例（filesystem）**：
+  ```json
+  {
+    "mcpServers": {
+      "filesystem": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      }
+    }
+  }
+- **依赖**：需安装 `langchain-mcp-adapters`（已在 requirements.txt 中声明）
+- **验证**：启动服务后发起聊天，观察后端日志是否出现 `MCP tools loaded | tools_count=...`
  
  ## 启动与停止
  
