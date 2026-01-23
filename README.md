@@ -10,6 +10,18 @@
  - 上传/管理文件（存 MongoDB）
  - 基于本地文件或 MongoDB 文档的 RAG 检索（会注入 `<rag_context>`）
  - 生成播客（podcast-creator + TTS，可选 Edge TTS）
+ - **远程沙箱执行**：通过 OpenSandbox 在隔离环境中执行代码、操作文件系统
+
+### OpenSandbox 远程沙箱
+- **服务来源**：[OpenSandbox](https://github.com/alibaba/OpenSandbox.git)（阿里巴巴开源的远程沙箱服务）
+- **工作目录**：`/workspace`（沙箱内的统一工作空间）
+- **默认镜像**：`sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest`
+- **环境变量**：
+  - `OPENSANDBOX_DOMAIN`/`SANDBOX_DOMAIN`：沙箱服务地址（默认 `localhost:8080`）
+  - `OPENSANDBOX_API_KEY`/`SANDBOX_API_KEY`：API 密钥
+  - `OPENSANDBOX_IMAGE`/`SANDBOX_IMAGE`：自定义 Docker 镜像
+  - `OPENSANDBOX_REQUEST_TIMEOUT_SECONDS`/`SANDBOX_REQUEST_TIMEOUT_SECONDS`：请求超时（默认 10 秒）
+- **降级策略**：如果 OpenSandbox 不可用，自动降级为本地文件系统模式
  
  ## 项目结构（以当前仓库为准）
  
