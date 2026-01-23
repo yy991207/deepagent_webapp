@@ -22,7 +22,8 @@ router = APIRouter()
 
 
 # 项目根目录：deepagents-webapp/
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+# chat_router.py 位于 backend/api/routers/，需要上 4 层到项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 @router.get("/api/chat/threads")

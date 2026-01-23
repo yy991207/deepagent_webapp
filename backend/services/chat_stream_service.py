@@ -287,6 +287,73 @@ class ChatStreamService:
                 )
                 sandbox_type = "opensandbox"
                 logger.info(f"OpenSandbox backend created for session: {thread_id}, sandbox_id: {sandbox_backend.id}")
+
+                # 关键逻辑：按 deepagents 官方约定，将本地 skills/skills 下的 SKILL.md 同步到沙箱
+                # 说明：
+                # - deepagents skills sources 约定为 backend 根目录下的 /skills/skills
+                # - 这里仅同步 SKILL.md（最小化），避免一次性拷贝整个目录导致性能和网络开销过大
+                # - 必须使用异步方法（aexecute/aupload_files）避免事件循环绑定问题
+                try:
+                    local_skills_root = self._base_dir / "skills" / "skills"
+                    logger.info(f"skills sync start | session_id={thread_id} | local_skills_root={local_skills_root} | exists={local_skills_root.exists()}")
+                    if local_skills_root.exists():
+                        files_to_upload: list[tuple[str, bytes]] = []
+                        skill_dirs_to_create: list[str] = []
+
+                        for skill_dir in local_skills_root.iterdir():
+                            if not skill_dir.is_dir():
+                                continue
+                            skill_md = skill_dir / "SKILL.md"
+                            if not skill_md.exists():
+                                continue
+                            skill_dirs_to_create.append(skill_dir.name)
+                            remote_path = f"/workspace/skills/skills/{skill_dir.name}/SKILL.md"
+                            files_to_upload.append((remote_path, skill_md.read_bytes()))
+
+                        logger.info(f"skills files prepared | session_id={thread_id} | files_count={len(files_to_upload)} | dirs_count={len(skill_dirs_to_create)}")
+                        if files_to_upload:
+                            # 关键逻辑：确保 skills 根目录和所有子目录存在（一次性执行）
+                            mkdir_cmds = ["mkdir -p /workspace/skills/skills"]
+                            mkdir_cmds.extend([f"mkdir -p /workspace/skills/skills/{name}" for name in skill_dirs_to_create])
+                            mkdir_all_cmd = " && ".join(mkdir_cmds)
+                            try:
+                                mkdir_result = await sandbox_backend.aexecute(mkdir_all_cmd)
+                                logger.info(f"mkdir skills dirs | session_id={thread_id} | exit_code={mkdir_result.exit_code} | dirs_count={len(skill_dirs_to_create)}")
+                                if mkdir_result.exit_code != 0:
+                                    logger.warning(f"mkdir skills dirs non-zero | output={mkdir_result.output}")
+                            except Exception as _mkdir_exc:
+                                logger.warning(f"mkdir skills dirs failed: {type(_mkdir_exc).__name__}: {_mkdir_exc}")
+
+                            # 关键逻辑：上传文件并检查每个文件的上传结果（使用异步方法）
+                            upload_responses = await sandbox_backend.aupload_files(files_to_upload)
+
+                            # 详细记录每个文件的上传状态
+                            success_count = 0
+                            error_count = 0
+                            for resp in upload_responses:
+                                if resp.error:
+                                    error_count += 1
+                                    logger.error(f"skill upload FAILED | session_id={thread_id} | path={resp.path} | error={resp.error}")
+                                else:
+                                    success_count += 1
+                                    logger.debug(f"skill upload OK | session_id={thread_id} | path={resp.path}")
+
+                            logger.info(f"skills upload summary | session_id={thread_id} | success={success_count} | failed={error_count} | total={len(upload_responses)}")
+
+                            # 关键逻辑：同步后做一次目录自检
+                            try:
+                                check = await sandbox_backend.aexecute("ls -la /workspace/skills/skills || true")
+                                logger.info(f"sandbox skills dir check | session_id={thread_id} | {check.output}")
+
+                                # 额外检查：抽一个 skill 子目录验证 SKILL.md 是否存在
+                                if files_to_upload:
+                                    sample_path = files_to_upload[0][0]
+                                    head_check = await sandbox_backend.aexecute(f"head -n 5 {sample_path} 2>&1 || echo 'FILE_NOT_FOUND'")
+                                    logger.info(f"skill file sample check | session_id={thread_id} | path={sample_path} | output={head_check.output[:200]}")
+                            except Exception as _check_exc:
+                                logger.warning(f"sandbox skills dir check failed: {type(_check_exc).__name__}: {_check_exc}")
+                except Exception as _sync_exc:
+                    logger.warning(f"sync skills to sandbox failed: {type(_sync_exc).__name__}: {_sync_exc}")
             except Exception as e:
                 err_msg = f"OpenSandbox 创建失败，将自动降级为无沙箱模式：{type(e).__name__}: {e}"
                 logger.exception(err_msg)

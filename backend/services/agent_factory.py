@@ -63,12 +63,24 @@ def create_agent(
     backend = _build_backend(workspace_root=workspace_root, sandbox=sandbox)
 
     # 关键逻辑：统一使用 deepagents.create_deep_agent 构建 agent
-    agent = create_deep_agent(
-        model=model,
-        tools=tools or [],
-        system_prompt=effective_prompt,
-        checkpointer=checkpointer,
-        backend=backend,
-        interrupt_on={} if auto_approve else None,
-    )
+    create_kwargs: dict[str, Any] = {
+        "model": model,
+        "tools": tools or [],
+        "system_prompt": effective_prompt,
+        "checkpointer": checkpointer,
+        "backend": backend,
+        "interrupt_on": {} if auto_approve else None,
+    }
+
+    # 关键逻辑：启用 deepagents 原生 skills 参数。
+    # 说明：
+    # - FilesystemBackend 会把 /skills/skills 映射到 root_dir/skills/skills
+    # - OpenSandboxBackend(BaseSandbox) 直接操作沙箱文件系统绝对路径，因此需要传入沙箱内真实路径
+    if backend is not None:
+        if sandbox is not None:
+            create_kwargs["skills"] = ["/workspace/skills/skills"]
+        else:
+            create_kwargs["skills"] = ["/skills/skills"]
+
+    agent = create_deep_agent(**create_kwargs)
     return agent, backend

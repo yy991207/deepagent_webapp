@@ -83,7 +83,12 @@ class OpenSandboxBackend(BaseSandbox):
         返回：
             包含合并输出、退出码和截断标志的 ExecuteResponse
         """
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
+            return self._execute_sync(command)
+
         if loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -123,6 +128,51 @@ class OpenSandboxBackend(BaseSandbox):
         """执行方法的异步版本。"""
         return await self._aexecute(command)
 
+    async def als_info(self, path: str) -> list[dict]:
+        """异步版本的 ls_info，避免事件循环绑定问题。
+
+        说明：
+        - SkillsMiddleware 会调用 backend.als_info() 扫描 skills 目录
+        - BaseSandbox 的默认实现是 asyncio.to_thread(self.ls_info)，会创建新线程
+        - 新线程中的 execute() 会遇到事件循环绑定问题
+        - 因此需要直接实现异步版本，使用同一个事件循环
+        """
+        import json
+
+        cmd = f"""python3 -c "
+import os
+import json
+
+path = '{path}'
+
+try:
+    with os.scandir(path) as it:
+        for entry in it:
+            result = {{
+                'path': os.path.join(path, entry.name),
+                'is_dir': entry.is_dir(follow_symlinks=False)
+            }}
+            print(json.dumps(result))
+except FileNotFoundError:
+    pass
+except PermissionError:
+    pass
+" 2>/dev/null"""
+
+        result = await self._aexecute(cmd)
+
+        file_infos: list[dict] = []
+        for line in result.output.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                file_infos.append({"path": data["path"], "is_dir": data["is_dir"]})
+            except json.JSONDecodeError:
+                continue
+
+        return file_infos
+
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """从 OpenSandbox 下载多个文件。
 
@@ -132,7 +182,12 @@ class OpenSandboxBackend(BaseSandbox):
         返回：
             FileDownloadResponse 对象列表，每个输入路径对应一个
         """
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
+            return self._download_files_sync(paths)
+
         if loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -176,7 +231,12 @@ class OpenSandboxBackend(BaseSandbox):
         返回：
             FileUploadResponse 对象列表，每个输入文件对应一个
         """
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
+            return self._upload_files_sync(files)
+
         if loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
