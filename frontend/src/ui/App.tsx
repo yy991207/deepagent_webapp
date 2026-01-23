@@ -267,7 +267,7 @@ function App() {
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [filesystemWrites, setFilesystemWrites] = useState<FilesystemWrite[]>([]);
   const [writeDetailOpen, setWriteDetailOpen] = useState(false);
-  const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; title: string} | null>(null);
+  const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; title: string; file_type?: string; file_path?: string} | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
@@ -1589,7 +1589,13 @@ function App() {
                                     );
                                     if (resp.ok) {
                                       const data = await resp.json();
-                                      setWriteDetail({ write_id: w.write_id, content: data.content || "", title: w.title });
+                                      setWriteDetail({
+                                        write_id: w.write_id,
+                                        content: data.content || "",
+                                        title: w.title,
+                                        file_type: data.metadata?.type || "",
+                                        file_path: data.file_path || "",
+                                      });
                                       setWriteDetailOpen(true);
                                     }
                                   }}
@@ -2200,12 +2206,41 @@ function App() {
                 <div>
                   <div class="ref-section-title">文档内容</div>
                   <div style={{ maxHeight: "calc(100vh - 150px)", overflow: "auto" }}>
-                    <AssistantContent
-                      text={writeDetail.content}
-                      isPending={false}
-                      references={[]}
-                      onOpenRef={() => {}}
-                    />
+                    {(() => {
+                      const fileType = writeDetail.file_type?.toLowerCase() || "";
+                      // PDF 文件：使用 embed 标签渲染
+                      if (fileType === "pdf") {
+                        const pdfDataUrl = `data:application/pdf;base64,${writeDetail.content}`;
+                        return (
+                          <embed
+                            src={pdfDataUrl}
+                            type="application/pdf"
+                            style={{ width: "100%", height: "calc(100vh - 200px)", minHeight: "500px" }}
+                          />
+                        );
+                      }
+                      // 图片文件：使用 img 标签渲染
+                      if (["png", "jpg", "jpeg", "gif", "webp"].includes(fileType)) {
+                        const mimeType = fileType === "jpg" ? "jpeg" : fileType;
+                        const imgDataUrl = `data:image/${mimeType};base64,${writeDetail.content}`;
+                        return (
+                          <img
+                            src={imgDataUrl}
+                            alt={writeDetail.title}
+                            style={{ maxWidth: "100%", height: "auto" }}
+                          />
+                        );
+                      }
+                      // 其他文件：使用 AssistantContent 渲染（文本/Markdown）
+                      return (
+                        <AssistantContent
+                          text={writeDetail.content}
+                          isPending={false}
+                          references={[]}
+                          onOpenRef={() => {}}
+                        />
+                      );
+                    })()}
                   </div>
                 </div>
               ) : (
