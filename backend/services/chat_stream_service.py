@@ -33,6 +33,7 @@ from backend.prompts.chat_prompts import (
     reference_rules_prompt,
     file_write_rules_prompt,
     research_task_rules_prompt,
+    tool_whitelist_prompt,
     suggested_questions_prompt,
 )
 
@@ -329,6 +330,40 @@ class ChatStreamService:
                 ),
                 "tools": [*tools, rag_prep.rag_tool],
             }
+
+            # 关键逻辑：把运行时可用工具名显式注入 prompt，减少工具名拼写错误。
+            # 说明：
+            # - deepagents 内置 backend/skills 工具不一定能在这里直接拿到对象，因此用“显式兜底白名单”补齐。
+            # - 兜底名单来自运行时常见可用工具：ls/read_file/write_file/edit_file/glob/grep/execute/task/write_todos。
+            runtime_tool_names: set[str] = set()
+            for t in [*tools, rag_prep.rag_tool]:
+                name = getattr(t, "name", None)
+                if not name and callable(t):
+                    name = getattr(t, "__name__", None)
+                if name:
+                    runtime_tool_names.add(str(name))
+
+            runtime_tool_names.update(
+                {
+                    "ls",
+                    "read_file",
+                    "write_file",
+                    "write_to_file",
+                    "edit_file",
+                    "glob",
+                    "grep",
+                    "execute",
+                    "task",
+                    "write_todos",
+                    "http_request",
+                    "fetch_url",
+                    "web_search",
+                    "save_filesystem_write",
+                    "rag_query",
+                }
+            )
+
+            extra_system_prompt = (extra_system_prompt + "\n\n" + tool_whitelist_prompt(sorted(runtime_tool_names))).strip()
 
             agent = create_deep_agent(
                 model=model,

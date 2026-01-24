@@ -29,4 +29,23 @@ app.include_router(podcast_router)
 app.include_router(chat_router)
 app.include_router(filesystem_router)
 
+
+@app.on_event("shutdown")
+async def _shutdown_cleanup() -> None:
+    """服务退出时清理 OpenSandbox。
+
+    说明：
+    - 开发模式下如果启用 uvicorn --reload，会触发进程重启。
+    - 如果不清理旧进程创建的沙箱容器，Docker 里会残留多个 sandbox，导致同一 session 出现 A 写入、B 读取。
+    - 这里尽量在进程退出时清理当前进程持有的 sandbox。
+    """
+
+    try:
+        from backend.services.opensandbox_backend import get_sandbox_manager
+
+        await get_sandbox_manager().cleanup_all()
+    except Exception:
+        # 退出阶段不阻塞主流程
+        return
+
 __all__ = ["app"]

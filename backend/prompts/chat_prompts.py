@@ -169,6 +169,40 @@ def research_task_rules_prompt() -> str:
     )
 
 
+def tool_whitelist_prompt(tool_names: list[str]) -> str:
+    """返回工具白名单与严格拼写规则。
+
+    说明：
+    - 真实线上经常出现工具名拼写错误（例如把两个工具名拼在一起：write_todosls）。
+    - 这里把运行时可用的工具名显式列出来，并要求模型只能从白名单中选择。
+    - 该提示词只约束“工具调用名字”，不约束自然语言回答。
+
+    Args:
+        tool_names: 运行时可用工具名列表（已去重、已排序）
+
+    Returns:
+        工具白名单提示词
+    """
+
+    names = [str(x).strip() for x in (tool_names or []) if str(x).strip()]
+    uniq_sorted = sorted(set(names))
+    rendered = ", ".join(uniq_sorted)
+
+    return (
+        "<tool_whitelist>\n"
+        "重要：工具调用白名单（强制）\n\n"
+        "你只能调用下面列出的工具名，工具名必须完全一致（区分下划线/大小写），否则会报错：\n"
+        f"{rendered}\n\n"
+        "严格规则：\n"
+        "1. 工具名必须从白名单中逐字选择，禁止自己编新名字。\n"
+        "2. 禁止把两个工具名拼在一起（例如：write_todosls、read_filegrep）。\n"
+        "3. 禁止在工具名上添加前缀/后缀/复数/大小写变体（例如：Write_File、writeFiles）。\n"
+        "4. 当你不确定工具名时：不要尝试调用，先用自然语言确认或在脑中对照白名单。\n"
+        "5. 只要收到 'not a valid tool' 的报错：立刻停止继续试错，重新从白名单里选正确工具。\n"
+        "</tool_whitelist>"
+    )
+
+
 def suggested_questions_prompt(user_text: str, assistant_text: str) -> str:
     """生成推荐问题的 prompt 模板。
 

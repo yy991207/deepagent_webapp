@@ -81,7 +81,13 @@ start_backend() {
   : >"$BACKEND_LOG"
   stop_port_process "$BACKEND_PORT"
   log_info "启动后端服务"
-  cd "$ROOT_DIR" && "${PYTHON_CMD[@]}" -m uvicorn "$BACKEND_MODULE" --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload --log-level debug --log-config "$ROOT_DIR/uvicorn_log_config.yaml" \
+  # 关键逻辑：--reload 会导致进程重启，从而让同一 session 创建多个 OpenSandbox 容器（A 写入、B 读取）。
+  # 默认关闭热重载；如需开发热更新，可通过环境变量 BACKEND_RELOAD=1 开启。
+  local reload_flag=""
+  if [ "${BACKEND_RELOAD:-0}" = "1" ]; then
+    reload_flag="--reload"
+  fi
+  cd "$ROOT_DIR" && "${PYTHON_CMD[@]}" -m uvicorn "$BACKEND_MODULE" --host "$BACKEND_HOST" --port "$BACKEND_PORT" $reload_flag --log-level debug --log-config "$ROOT_DIR/uvicorn_log_config.yaml" \
     >"$BACKEND_LOG" 2>&1 &
   echo $! >"$BACKEND_PID_FILE"
   log_info "后端 PID: $(cat "$BACKEND_PID_FILE")"
