@@ -625,6 +625,14 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         Returns:
             相关文档片段列表，每个片段包含 text/score/source/mongo_id 字段
         """
+
+        # 延迟导入 llama_index，避免在未安装依赖时阻塞整个服务
+        try:
+            from llama_index.core import StorageContext, load_index_from_storage  # type: ignore
+        except Exception:
+            logger.exception("RAG retrieve import failed. persist_dir=%s", str(self._persist_dir))
+            return []
+
         try:
             storage_context = StorageContext.from_defaults(persist_dir=str(self._persist_dir))
             index = load_index_from_storage(storage_context)
