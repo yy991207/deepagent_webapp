@@ -161,11 +161,34 @@ def research_task_rules_prompt() -> str:
         "当用户提出调研/研究/新闻整理/报告类需求时：\n"
         "1. 不要只描述流程，必须实际调用工具推进任务。\n"
         "2. 优先使用 task 工具把调研拆分成 2-5 个互不重叠的子问题，并行执行。\n"
-        "3. task 的 subagent_type 固定使用 research-analyst。\n"
+        "3. task 的 subagent_type 固定使用 research-analyst（注意：subagent_type 只能是 general-purpose 或 research-analyst，禁止写 skill 名）。\n"
         "4. 子智能体返回后，你再综合所有子结果，输出最终结论/报告。\n\n"
         "示例：\n"
         "- 用户要‘最近 3 个月 AI Agent 新闻’，你可以拆成：OpenAI/Anthropic/Google、产品发布、融资并购、风险争议等。\n"
         "</research_task_rules>"
+    )
+
+
+def task_subagent_type_rules_prompt() -> str:
+    """返回 task 子智能体类型约束提示词。
+
+    说明：
+    - 线上出现过 subagent_type 拼写/类型错误（例如：web-artifacts-builder）。
+    - web-artifacts-builder 是一个 skill 名称，不是 subagent_type。
+    - 这里强制约束 task 工具的 subagent_type 取值范围，避免运行时报错。
+    """
+
+    return (
+        "<task_subagent_type_rules>\n"
+        "重要：task 子智能体类型（强制）\n\n"
+        "当你调用 task 工具时，subagent_type 只能写以下二选一：\n"
+        "- general-purpose\n"
+        "- research-analyst\n\n"
+        "严格规则：\n"
+        "1. 禁止把 skill 名当成 subagent_type（例如：web-artifacts-builder）。\n"
+        "2. 如果你要使用 web-artifacts-builder：应该通过技能/命令执行链路完成，而不是通过 task.subagent_type。\n"
+        "3. 当你不确定用哪个子智能体：优先用 general-purpose；只有调研/检索类任务才用 research-analyst。\n"
+        "</task_subagent_type_rules>"
     )
 
 
