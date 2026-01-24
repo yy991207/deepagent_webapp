@@ -114,6 +114,7 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
     """
     import base64
     import os
+    from urllib.parse import quote
 
     mongo = get_mongo_manager()
 
@@ -135,6 +136,14 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
 
     # 从 file_path 提取文件名
     filename = os.path.basename(file_path) if file_path else "document"
+
+    # 关键逻辑：HTTP Header 默认按 latin-1 编码，中文文件名会触发 UnicodeEncodeError。
+    # 这里同时提供 ASCII fallback 的 filename 和 RFC5987 的 filename*，兼容中文。
+    ascii_filename = filename.encode("ascii", "ignore").decode("ascii")
+    if not ascii_filename:
+        ascii_filename = "document"
+    encoded_filename = quote(filename, safe="")
+    content_disposition = f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
 
     # 二进制文件类型映射
     BINARY_TYPES = {
@@ -182,12 +191,15 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
     # 确保文件名有正确的扩展名
     if file_type and not filename.endswith(f".{file_type}"):
         filename = f"{filename}.{file_type}"
+        ascii_filename = filename.encode("ascii", "ignore").decode("ascii") or "document"
+        encoded_filename = quote(filename, safe="")
+        content_disposition = f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
 
     return Response(
         content=content_bytes,
         media_type=media_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": content_disposition,
             "Content-Type": media_type,
         }
     )

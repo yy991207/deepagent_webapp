@@ -101,8 +101,14 @@ class OpenSandboxBackend(BaseSandbox):
         """使用新事件循环的同步执行辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(self._aexecute(command))
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            except Exception:
+                pass
             loop.close()
 
     async def _aexecute(self, command: str) -> ExecuteResponse:
@@ -200,8 +206,14 @@ except PermissionError:
         """使用新事件循环的同步下载辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(self._adownload_files(paths))
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            except Exception:
+                pass
             loop.close()
 
     async def _adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
@@ -249,8 +261,14 @@ except PermissionError:
         """使用新事件循环的同步上传辅助方法。"""
         loop = asyncio.new_event_loop()
         try:
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(self._aupload_files(files))
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.run_until_complete(loop.shutdown_default_executor())
+            except Exception:
+                pass
             loop.close()
 
     async def _aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:

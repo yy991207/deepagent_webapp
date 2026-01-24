@@ -64,6 +64,15 @@ class SkillsSyncService:
             files_to_upload: list[tuple[str, bytes]] = []
             skill_dirs_to_create: list[str] = []
 
+            allowed_suffixes = {
+                ".md",
+                ".txt",
+                ".py",
+                ".json",
+                ".yaml",
+                ".yml",
+            }
+
             # 扫描本地 skills 目录，收集所有 SKILL.md 文件
             for skill_dir in local_skills_root.iterdir():
                 if not skill_dir.is_dir():
@@ -74,6 +83,21 @@ class SkillsSyncService:
                 skill_dirs_to_create.append(skill_dir.name)
                 remote_path = f"{remote_root}/{skill_dir.name}/SKILL.md"
                 files_to_upload.append((remote_path, skill_md.read_bytes()))
+
+                # 同步 skill 目录下的脚本/配置文件到沙箱，保证技能可执行
+                for p in skill_dir.rglob("*"):
+                    if not p.is_file():
+                        continue
+                    if p.name.startswith("."):
+                        continue
+                    if p.name == "SKILL.md":
+                        continue
+                    if p.suffix.lower() not in allowed_suffixes:
+                        continue
+
+                    rel = p.relative_to(skill_dir).as_posix()
+                    remote_file = f"{remote_root}/{skill_dir.name}/{rel}"
+                    files_to_upload.append((remote_file, p.read_bytes()))
 
             logger.info(
                 "skills files prepared | session_id=%s | files_count=%s | dirs_count=%s",
