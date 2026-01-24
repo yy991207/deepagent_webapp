@@ -74,3 +74,33 @@ def get_uploaded_source_detail(id: str, max_bytes: int = 200_000) -> dict[str, A
     if detail is None:
         raise HTTPException(status_code=404, detail="not found")
     return detail
+
+
+@router.patch("/api/sources/{id}")
+def rename_uploaded_source(id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    mongo = get_mongo_manager()
+    filename = str(payload.get("filename") or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+
+    try:
+        ok = mongo.rename_document(doc_id=id, filename=filename)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to rename") from exc
+
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"success": True, "id": id, "filename": filename}
+
+
+@router.delete("/api/sources/{id}")
+def delete_uploaded_source(id: str) -> dict[str, Any]:
+    mongo = get_mongo_manager()
+    try:
+        ok = mongo.delete_document(doc_id=id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to delete") from exc
+
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"success": True, "id": id}

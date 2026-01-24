@@ -223,6 +223,12 @@ function App() {
   const [sourceDetailOpen, setSourceDetailOpen] = useState(false);
   const [sourceDetail, setSourceDetail] = useState<UploadedSourceDetail | null>(null);
   const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
+
+  const [sourceActionMenuId, setSourceActionMenuId] = useState<string | null>(null);
+  const [renameSourceOpen, setRenameSourceOpen] = useState(false);
+  const [renameSourceTarget, setRenameSourceTarget] = useState<UploadedSource | null>(null);
+  const [renameSourceDraft, setRenameSourceDraft] = useState<string>("");
+  const [deleteSourceId, setDeleteSourceId] = useState<string | null>(null);
   
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [logs, setLogs] = useState<AgentLog[]>([]);
@@ -353,6 +359,36 @@ function App() {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!sourceActionMenuId) return;
+
+    const onDocClick = (ev: MouseEvent) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target) {
+        setSourceActionMenuId(null);
+        return;
+      }
+      if (typeof (target as any).closest === "function") {
+        const inside = (target as any).closest(".source-more-wrap");
+        if (inside) return;
+      }
+      setSourceActionMenuId(null);
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setSourceActionMenuId(null);
+      }
+    };
+
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sourceActionMenuId]);
 
   const refreshMemoryStats = async (sid: string) => {
     const threadId = String(sid || "").trim();
@@ -788,6 +824,75 @@ function App() {
     }
     const data = (await response.json()) as { results?: UploadedSource[] };
     setSources(Array.isArray(data.results) ? data.results : []);
+  };
+
+  const requestRenameSource = (src: UploadedSource) => {
+    setSourceActionMenuId(null);
+    setRenameSourceTarget(src);
+    setRenameSourceDraft(src.filename || "");
+    setRenameSourceOpen(true);
+  };
+
+  const confirmRenameSource = async () => {
+    const target = renameSourceTarget;
+    const nextName = renameSourceDraft.trim();
+    if (!target || !nextName) return;
+
+    try {
+      const resp = await fetch(`/api/sources/${encodeURIComponent(target.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: nextName }),
+      });
+      if (!resp.ok) {
+        return;
+      }
+    } catch {
+      return;
+    } finally {
+      setRenameSourceOpen(false);
+      setRenameSourceTarget(null);
+      setRenameSourceDraft("");
+    }
+
+    await fetchSources();
+
+    if (sourceDetailOpen && sourceDetail?.id === target.id) {
+      setSourceDetail({ ...sourceDetail, filename: nextName });
+    }
+  };
+
+  const requestDeleteSource = (src: UploadedSource) => {
+    setSourceActionMenuId(null);
+    setDeleteSourceId(src.id);
+  };
+
+  const confirmDeleteSource = async () => {
+    const id = deleteSourceId;
+    if (!id) return;
+    setDeleteSourceId(null);
+
+    try {
+      const resp = await fetch(`/api/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!resp.ok) {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    if (sourceDetailOpen && sourceDetail?.id === id) {
+      setSourceDetailOpen(false);
+      setSourceDetail(null);
+    }
+
+    await fetchSources();
   };
 
   useEffect(() => {
@@ -1556,6 +1661,37 @@ function App() {
                   <div class="file-list">
                     {sources.map((s) => (
                       <div key={s.id} class="file-item" onClick={() => openSourceDetail(s)}>
+                        <div class="source-more-wrap" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            class="source-more-btn"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSourceActionMenuId((prev) => (prev === s.id ? null : s.id));
+                            }}
+                            aria-label="来源操作"
+                          >
+                            <Icons.MoreVert />
+                          </button>
+                          {sourceActionMenuId === s.id && (
+                            <div class="source-more-menu" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                class="source-more-item"
+                                type="button"
+                                onClick={() => requestRenameSource(s)}
+                              >
+                                重命名
+                              </button>
+                              <button
+                                class="source-more-item danger"
+                                type="button"
+                                onClick={() => requestDeleteSource(s)}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          )}
+                        </div>
                         <div class="file-icon"><Icons.Pdf /></div>
                         <div class="file-name" title={s.rel_path || s.filename}>{s.filename}</div>
                         <div class="checkbox-wrapper" onClick={(e) => e.stopPropagation()}>
@@ -2626,6 +2762,45 @@ function App() {
               ) : (
                 <div class="ref-muted">暂无详情</div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameSourceOpen && (
+        <div class="add-source-backdrop" onClick={() => setRenameSourceOpen(false)}>
+          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="source-action-title">重命名</div>
+            <input
+              class="source-action-input"
+              value={renameSourceDraft}
+              onInput={(e) => setRenameSourceDraft((e.target as HTMLInputElement).value)}
+              placeholder="请输入新的名称"
+            />
+            <div class="source-action-actions">
+              <button class="source-action-btn" type="button" onClick={() => setRenameSourceOpen(false)}>
+                取消
+              </button>
+              <button class="source-action-btn primary" type="button" onClick={() => void confirmRenameSource()}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteSourceId && (
+        <div class="add-source-backdrop" onClick={() => setDeleteSourceId(null)}>
+          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="source-action-title">删除来源</div>
+            <div class="source-action-desc">确认删除该来源吗？删除后不可恢复。</div>
+            <div class="source-action-actions">
+              <button class="source-action-btn" type="button" onClick={() => setDeleteSourceId(null)}>
+                取消
+              </button>
+              <button class="source-action-btn danger" type="button" onClick={() => void confirmDeleteSource()}>
+                删除
+              </button>
             </div>
           </div>
         </div>

@@ -211,6 +211,42 @@ class MongoDbManager:
             "content_preview": content_preview,
         }
 
+    def rename_document(self, *, doc_id: str, filename: str) -> bool:
+        try:
+            oid = ObjectId(doc_id)
+        except Exception:
+            return False
+
+        new_name = str(filename or "").strip()
+        if not new_name:
+            return False
+
+        item = self._collection().find_one({"_id": oid}, projection={"rel_path": 1})
+        if not item:
+            return False
+
+        rel_path = str(item.get("rel_path") or "")
+        if "/" in rel_path:
+            prefix = rel_path.rsplit("/", 1)[0]
+            new_rel_path = f"{prefix}/{new_name}" if prefix else new_name
+        else:
+            new_rel_path = new_name
+
+        result = self._collection().update_one(
+            {"_id": oid},
+            {"$set": {"filename": new_name, "rel_path": new_rel_path}},
+        )
+        return bool(getattr(result, "modified_count", 0) or 0)
+
+    def delete_document(self, *, doc_id: str) -> bool:
+        try:
+            oid = ObjectId(doc_id)
+        except Exception:
+            return False
+
+        result = self._collection().delete_one({"_id": oid})
+        return bool(getattr(result, "deleted_count", 0) or 0)
+
     def append_chat_message(
         self,
         *,
