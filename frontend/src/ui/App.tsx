@@ -267,6 +267,7 @@ function App() {
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [filesystemWrites, setFilesystemWrites] = useState<FilesystemWrite[]>([]);
   const [writeDetailOpen, setWriteDetailOpen] = useState(false);
+  const [writeDetailFullscreen, setWriteDetailFullscreen] = useState(false);
   const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; title: string; file_type?: string; file_path?: string} | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
@@ -2191,17 +2192,44 @@ function App() {
       )}
 
       {writeDetailOpen && (
-        <div class="ref-modal-backdrop" onClick={() => setWriteDetailOpen(false)}>
-          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
+        <div class="ref-modal-backdrop" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }}>
+          <div
+            class={writeDetailFullscreen ? "ref-modal ref-modal-fullscreen" : "ref-modal"}
+            onClick={(e) => e.stopPropagation()}
+            style={writeDetailFullscreen ? {
+              width: "100vw",
+              height: "100vh",
+              borderRadius: 0,
+              margin: 0
+            } : undefined}
+          >
             <div class="ref-modal-header">
               <div class="ref-modal-title">
                 {writeDetail?.title || "文档详情"}
               </div>
-              <button class="ref-modal-close" onClick={() => setWriteDetailOpen(false)} type="button">
-                ×
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  class="ref-modal-close"
+                  onClick={() => setWriteDetailFullscreen(!writeDetailFullscreen)}
+                  type="button"
+                  title={writeDetailFullscreen ? "退出全屏" : "全屏查看"}
+                >
+                  {writeDetailFullscreen ? (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    </svg>
+                  )}
+                </button>
+                <button class="ref-modal-close" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }} type="button">
+                  ×
+                </button>
+              </div>
             </div>
-            <div class="ref-modal-body">
+            <div class="ref-modal-body" style={writeDetailFullscreen ? { height: "calc(100vh - 56px)" } : undefined}>
               {writeDetail ? (
                 <div>
                   <div class="ref-section-title">文档内容</div>

@@ -118,6 +118,38 @@ def file_write_rules_prompt() -> str:
     )
 
 
+def research_output_format_prompt() -> str:
+    """返回深度研究/调研类任务的输出格式规则。"""
+    return (
+        "<research_output_format>\n"
+        "重要：深度研究/调研任务的输出格式规则\n\n"
+        "当用户的需求属于以下类型时，默认使用 HTML 格式输出结果：\n"
+        "- 调研类：市场调研、行业调研、竞品调研、用户调研等\n"
+        "- 研究类：课题研究、专题研究、深度研究、研究报告等\n"
+        "- 分析类：深度分析、综合分析、对比分析、趋势分析等\n"
+        "- 报告类：研究报告、调研报告、分析报告、总结报告等\n\n"
+        "识别关键词：调研、研究、深度、分析、报告、综述、探究、考察、调查等\n\n"
+        "HTML 格式输出规则：\n"
+        "1. 除非用户明确指定其他格式（如 PDF、DOCX、Markdown、Word、PPT 等），否则一律使用 HTML 格式\n"
+        "2. HTML 文件应包含完整的结构：<!DOCTYPE html>、<html>、<head>、<body> 等\n"
+        "3. 必须在 <head> 中包含内联 CSS 样式，确保文档美观、专业\n"
+        "4. 推荐的 HTML 样式特点：\n"
+        "   - 清晰的标题层级（h1、h2、h3）\n"
+        "   - 适当的段落间距和行高\n"
+        "   - 表格使用边框和斑马纹样式\n"
+        "   - 重点内容使用高亮或加粗\n"
+        "   - 整体配色专业、易读\n"
+        "5. 文件扩展名使用 .html\n\n"
+        "示例场景：\n"
+        "- 用户说：帮我调研一下XX行业 → 输出 HTML 格式\n"
+        "- 用户说：深度研究XX课题 → 输出 HTML 格式\n"
+        "- 用户说：写一份XX分析报告 → 输出 HTML 格式\n"
+        "- 用户说：帮我调研XX，输出 PDF → 输出 PDF 格式（用户明确指定）\n"
+        "- 用户说：用 Markdown 写一份研究报告 → 输出 Markdown 格式（用户明确指定）\n"
+        "</research_output_format>"
+    )
+
+
 def suggested_questions_prompt(user_text: str, assistant_text: str) -> str:
     """生成推荐问题的 prompt 模板。
 
