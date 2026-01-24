@@ -248,6 +248,8 @@ class MongoDbManager:
             "tool_output": tool_output,
             "started_at": started_at,
             "ended_at": ended_at,
+            # 前端反馈信息：按 [copy, like, dislike] 的顺序记录，默认均为 0
+            "feedback": [0, 0, 0],
             "created_at": created_at,
         }
         result = self._chat_collection().insert_one(doc)
@@ -426,11 +428,51 @@ class MongoDbManager:
                     "tool_output": item.get("tool_output"),
                     "started_at": started_at,
                     "ended_at": ended_at,
+                    "feedback": item.get("feedback") or [0, 0, 0],
                     "created_at": created_at,
                 }
             )
         # 反转结果，按时间升序返回（旧消息在前，新消息在后）
         return list(reversed(out))
+
+    def update_message_feedback(self, *, thread_id: str, message_id: str, index: int) -> None:
+        """更新单条消息的反馈信息。
+
+        说明：
+        - feedback 字段为长度为 3 的数组，含义为 [copy, like, dislike]
+        - 本方法会将指定下标位置的值置为 1，其它位置保持不变
+        """
+
+        if index not in (0, 1, 2):
+            return
+
+        try:
+            from bson import ObjectId  # 延迟导入，避免模块加载时出错
+        except Exception:
+            return
+
+        try:
+            oid = ObjectId(str(message_id))
+        except Exception:
+            return
+
+        coll = self._chat_collection()
+        doc = coll.find_one({"_id": oid, "thread_id": thread_id})
+        if not doc:
+            return
+
+        fb = doc.get("feedback")
+        if not isinstance(fb, list) or len(fb) != 3:
+            fb = [0, 0, 0]
+
+        try:
+            fb[index] = 1
+        except Exception:
+            fb = [0, 0, 0]
+            fb[index] = 1
+
+        now = get_beijing_time()
+        coll.update_one({"_id": oid}, {"$set": {"feedback": fb, "updated_at": now}})
 
     def upsert_chat_session_title(self, *, session_id: str, assistant_id: str, title: str) -> None:
         """写入/更新会话标题。

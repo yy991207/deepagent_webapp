@@ -285,6 +285,53 @@ function App() {
 
   const allFilePaths = useMemo(() => sources.map((s) => s.id), [sources]);
 
+  // 发送单条消息的反馈信息：index 含义为 [copy, like, dislike]
+  const sendMessageFeedback = async (messageId: string, index: number) => {
+    const mid = String(messageId || "").trim();
+    const sid = String(sessionId || "").trim();
+    if (!mid || !sid) return;
+    if (![0, 1, 2].includes(index)) return;
+
+    const action = index === 0 ? "copy" : index === 1 ? "like" : "dislike";
+    try {
+      await fetch("/api/chat/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sid, message_id: mid, action }),
+      });
+    } catch {
+      // 静默失败：反馈不上报不影响主流程
+    }
+  };
+
+  const handleCopyMessage = async (message: ChatMessage) => {
+    if (message.role !== "assistant") return;
+    const text = message.content || "";
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(text);
+        addLog("已复制回复内容", "info");
+      } else {
+        // 兼容降级：直接选中内容交给用户手动复制
+        addLog("当前环境不支持一键复制，请手动选中文本复制", "error");
+      }
+    } catch {
+      addLog("复制失败，请手动复制", "error");
+    }
+
+    await sendMessageFeedback(message.id, 0);
+  };
+
+  const handleLikeMessage = async (message: ChatMessage) => {
+    if (message.role !== "assistant") return;
+    await sendMessageFeedback(message.id, 1);
+  };
+
+  const handleDislikeMessage = async (message: ChatMessage) => {
+    if (message.role !== "assistant") return;
+    await sendMessageFeedback(message.id, 2);
+  };
+
   const setAllSelected = (checked: boolean) => {
     if (!checked) {
       setSelectedFiles(new Set());
@@ -650,6 +697,7 @@ function App() {
           attachments: m.attachments || [],
           references: m.references || [],
           suggestedQuestions: m.suggested_questions || [],
+          feedback: (m as any).feedback as [number, number, number] | undefined,
           timestamp,
         };
 
@@ -1698,9 +1746,27 @@ function App() {
                         );
                       })()}
                       <div class="message-actions">
-                        <button class="action-btn"><Icons.Copy /></button>
-                        <button class="action-btn"><Icons.ThumbUp /></button>
-                        <button class="action-btn"><Icons.ThumbDown /></button>
+                        <button
+                          class="action-btn"
+                          type="button"
+                          onClick={() => handleCopyMessage(message)}
+                        >
+                          <Icons.Copy />
+                        </button>
+                        <button
+                          class="action-btn"
+                          type="button"
+                          onClick={() => handleLikeMessage(message)}
+                        >
+                          <Icons.ThumbUp />
+                        </button>
+                        <button
+                          class="action-btn"
+                          type="button"
+                          onClick={() => handleDislikeMessage(message)}
+                        >
+                          <Icons.ThumbDown />
+                        </button>
                       </div>
                       {message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
                         <div class="suggested-questions">

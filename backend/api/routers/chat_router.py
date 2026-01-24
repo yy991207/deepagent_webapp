@@ -161,6 +161,35 @@ def chat_history(session_id: str | None = None, thread_id: str | None = None, li
     return {"session_id": effective_id, "messages": items, "writes": writes}
 
 
+@router.post("/api/chat/feedback")
+def chat_feedback(payload: dict[str, Any]) -> dict[str, Any]:
+    """更新单条消息的反馈信息。
+
+    说明：
+    - feedback 为 [copy, like, dislike] 三个位置，取值 0/1
+    - 前端只负责上报哪一个动作被触发，后端将对应位置置为 1
+    """
+
+    session_id = str(payload.get("session_id") or payload.get("thread_id") or "").strip()
+    message_id = str(payload.get("message_id") or "").strip()
+    action = str(payload.get("action") or "").strip().lower()
+
+    if not session_id or not message_id:
+        raise HTTPException(status_code=400, detail="session_id and message_id are required")
+
+    index_map = {"copy": 0, "like": 1, "dislike": 2}
+    if action not in index_map:
+        raise HTTPException(status_code=400, detail="invalid action")
+
+    mongo = get_mongo_manager()
+    try:
+        mongo.update_message_feedback(thread_id=session_id, message_id=message_id, index=index_map[action])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to update feedback") from exc
+
+    return {"success": True, "session_id": session_id, "message_id": message_id, "action": action}
+
+
 @router.get("/api/chat/memory")
 def chat_memory(thread_id: str, assistant_id: str = "agent") -> dict[str, Any]:
     mongo = get_mongo_manager()

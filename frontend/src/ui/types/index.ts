@@ -81,6 +81,8 @@ export type ChatMessage =
       references?: RagReference[];
       suggestedQuestions?: string[];
       writes?: FilesystemWrite[];
+      // 消息反馈：[copy, like, dislike]
+      feedback?: [number, number, number];
       isPending?: boolean;
       timestamp?: string;
     }
