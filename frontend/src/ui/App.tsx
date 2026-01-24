@@ -2231,6 +2231,24 @@ function App() {
                           />
                         );
                       }
+                      // HTML 文件：使用 iframe 渲染
+                      if (["html", "htm"].includes(fileType)) {
+                        return (
+                          <iframe
+                            srcDoc={writeDetail.content}
+                            title={writeDetail.title}
+                            style={{
+                              width: "100%",
+                              height: "calc(100vh - 200px)",
+                              minHeight: "500px",
+                              border: "1px solid #e0e0e0",
+                              borderRadius: "4px",
+                              background: "#fff"
+                            }}
+                            sandbox="allow-same-origin"
+                          />
+                        );
+                      }
                       // 其他文件：使用 AssistantContent 渲染（文本/Markdown）
                       return (
                         <AssistantContent
