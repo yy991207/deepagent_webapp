@@ -567,16 +567,23 @@ function App() {
 
     // 构建 write_id 到文档的映射
     const writeMap = new Map<string, FilesystemWrite>();
-    writes.forEach(w => writeMap.set(w.write_id, w));
+    writes.forEach((w) => writeMap.set(w.write_id, w));
 
-    // 构建 tool_call_id 到 write_id 的映射（从 write_file 工具的 output 中提取）
+    // 构建 tool_call_id 到 write_id 的映射
+    // 说明：
+    // - 新逻辑：优先使用 save_filesystem_write 工具的 output（其中包含 write_id/title/type）
+    // - 兼容旧逻辑：如果 write_file 的 output 里带有 write_id，也一并支持
     const toolToWriteMap = new Map<string, string>();
-    items.forEach(m => {
-      if (m.role === "tool" && m.tool_name === "write_file" && m.tool_output) {
+    items.forEach((m) => {
+      if (m.role === "tool" && m.tool_output) {
         try {
           const output = typeof m.tool_output === "string" ? JSON.parse(m.tool_output) : m.tool_output;
-          if (output.write_id) {
-            toolToWriteMap.set(String(m.tool_call_id || m.id), output.write_id);
+          const writeId = (output as any)?.write_id;
+          if (
+            writeId &&
+            (m.tool_name === "save_filesystem_write" || m.tool_name === "write_file")
+          ) {
+            toolToWriteMap.set(String(m.tool_call_id || m.id), String(writeId));
           }
         } catch (e) {
           // 忽略解析错误
@@ -587,13 +594,17 @@ function App() {
     // 构建 assistant 消息 ID 到文档列表的映射
     const assistantWritesMap = new Map<string, FilesystemWrite[]>();
     
-    // 遍历消息，找到每个 write_file 工具调用对应的 assistant 消息
+    // 遍历消息，找到每个文档写入工具调用对应的 assistant 消息
     let currentAssistantId: string | null = null;
     for (let i = items.length - 1; i >= 0; i--) {
       const m = items[i];
       if (m.role === "assistant") {
         currentAssistantId = m.id;
-      } else if (m.role === "tool" && m.tool_name === "write_file" && currentAssistantId) {
+      } else if (
+        m.role === "tool" &&
+        (m.tool_name === "save_filesystem_write" || m.tool_name === "write_file") &&
+        currentAssistantId
+      ) {
         const writeId = toolToWriteMap.get(String(m.tool_call_id || m.id));
         if (writeId && writeMap.has(writeId)) {
           const write = writeMap.get(writeId)!;
@@ -935,7 +946,12 @@ function App() {
       return;
     }
     if (payload.type === "tool.end") {
-      console.log("tool.end 事件收到:", { name: payload.name, status: payload.status, output: payload.output, message_id: (payload as any).message_id });
+      console.log("tool.end 事件收到:", {
+        name: payload.name,
+        status: payload.status,
+        output: payload.output,
+        message_id: (payload as any).message_id,
+      });
       addLog(`Tool End: ${payload.name}`, "tool");
       const endedAt = new Date().toISOString();
       setMessages((prev: ChatMessage[]) =>
@@ -948,28 +964,34 @@ function App() {
         }),
       );
 
-      // 关键逻辑：write_file 工具结束后，直接把文档结果写入前端状态，避免必须刷新页面才能看到卡片
-      console.log("检查是否为 write_file:", { isWriteFile: payload.name === "write_file", notError: payload.status !== "error" });
-      if (payload.name === "write_file" && payload.status !== "error") {
+      // 关键逻辑：文档写入相关工具结束后，直接把文档结果写入前端状态，避免必须刷新页面才能看到卡片
+      const isWriteTool = payload.name === "save_filesystem_write" || payload.name === "write_file";
+      console.log("检查是否为文档写入工具:", {
+        name: payload.name,
+        isWriteTool,
+        notError: payload.status !== "error",
+      });
+
+      if (isWriteTool && payload.status !== "error") {
         let out = payload.output as any;
-        
+
         // 如果 output 是字符串，尝试解析为 JSON
         if (typeof out === "string") {
           try {
             out = JSON.parse(out);
           } catch (e) {
-            console.warn("write_file output 不是有效的 JSON:", out);
+            console.warn("文档写入工具 output 不是有效的 JSON:", out);
           }
         }
-        
-        console.log("write_file tool.end 收到:", { output: out, type: typeof out });
-        
-        const writeId = out && typeof out === "object" ? String(out.write_id || "") : "";
+
+        console.log("文档写入工具 tool.end 收到:", { name: payload.name, output: out, type: typeof out });
+
+        const writeId = out && typeof out === "object" ? String((out as any).write_id || "") : "";
         if (writeId) {
-          const title = String(out.title || "文档");
-          const type = String(out.type || "txt");
-          const size = Number(out.size || 0);
-          const filePath = String(out.file_path || "");
+          const title = String((out as any).title || "文档");
+          const type = String((out as any).type || "txt");
+          const size = Number((out as any).size || 0);
+          const filePath = String((out as any).file_path || "");
 
           const nextWrite: FilesystemWrite = {
             write_id: writeId,
@@ -982,7 +1004,7 @@ function App() {
           };
 
           console.log("即将更新 filesystemWrites，新文档:", nextWrite);
-          
+
           setFilesystemWrites((prev) => {
             // 去重：同一个 write_id 只保留最新一条
             const updated = [nextWrite, ...(prev || []).filter((w) => w.write_id !== writeId)];
@@ -992,15 +1014,19 @@ function App() {
 
           // 绑定到当前 message_id 对应的 assistant 消息
           const targetMessageId = (payload as any).message_id || currentMessageIdRef.current;
-          console.log("write_file 绑定到 message_id:", targetMessageId);
-          
+          console.log("文档写入工具绑定到 message_id:", targetMessageId);
+
           setMessages((prev) => {
-            console.log("绑定文档时的消息列表:", prev.map(m => ({ id: m.id, role: m.role })));
-            
+            console.log(
+              "绑定文档时的消息列表:",
+              prev.map((m) => ({ id: m.id, role: m.role })),
+            );
+
             if (!targetMessageId) {
               console.warn("没有 targetMessageId，使用回退逻辑");
               // 如果没有 message_id，回退到旧逻辑：绑定到最后一条 assistant 消息
-              const lastAssistantIndex = [...prev].map((m, i) => ({ m, i }))
+              const lastAssistantIndex = [...prev]
+                .map((m, i) => ({ m, i }))
                 .reverse()
                 .find((x) => x.m.role === "assistant")?.i;
 
@@ -1013,28 +1039,39 @@ function App() {
                 if (i !== lastAssistantIndex || m.role !== "assistant") {
                   return m;
                 }
-                const existing = Array.isArray((m as any).writes) ? ((m as any).writes as FilesystemWrite[]) : [];
+                const existing = Array.isArray((m as any).writes)
+                  ? ((m as any).writes as FilesystemWrite[])
+                  : [];
                 const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
                 return { ...(m as any), writes: merged };
               });
             }
 
             // 找到 id 匹配的 assistant 消息
-            const matchedMessage = prev.find(m => m.id === targetMessageId && m.role === "assistant");
+            const matchedMessage = prev.find(
+              (m) => m.id === targetMessageId && m.role === "assistant",
+            );
             if (!matchedMessage) {
-              console.warn(`未找到匹配的 assistant 消息: ${targetMessageId}，缓存文档等待消息创建`);
+              console.warn(
+                `未找到匹配的 assistant 消息: ${targetMessageId}，缓存文档等待消息创建`,
+              );
               // 缓存文档，等消息创建后再绑定
               const existing = pendingWritesRef.current.get(targetMessageId) || [];
               pendingWritesRef.current.set(targetMessageId, [nextWrite, ...existing]);
-              console.log(`已缓存文档到 pendingWritesRef，message_id: ${targetMessageId}，当前缓存:`, Array.from(pendingWritesRef.current.entries()));
+              console.log(
+                `已缓存文档到 pendingWritesRef，message_id: ${targetMessageId}，当前缓存:`,
+                Array.from(pendingWritesRef.current.entries()),
+              );
               return prev;
             }
-            
+
             return prev.map((m) => {
               if (m.id !== targetMessageId || m.role !== "assistant") {
                 return m;
               }
-              const existing = Array.isArray((m as any).writes) ? ((m as any).writes as FilesystemWrite[]) : [];
+              const existing = Array.isArray((m as any).writes)
+                ? ((m as any).writes as FilesystemWrite[])
+                : [];
               const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
               console.log(`文档已绑定到消息 ${targetMessageId}:`, merged);
               return { ...(m as any), writes: merged };

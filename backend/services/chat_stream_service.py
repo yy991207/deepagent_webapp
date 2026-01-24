@@ -17,9 +17,11 @@ import time
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
+from deepagents import create_deep_agent
+from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.middleware.subagents import SubAgent
 from langchain_core.messages import HumanMessage
 
-from backend.services.agent_factory import create_agent
 from backend.services.agent_stream_event_service import AgentStreamEventService
 from backend.config.deepagents_settings import create_model, settings
 from backend.services.checkpointer_provider import get_checkpointer
@@ -37,7 +39,6 @@ from backend.prompts.chat_prompts import (
 from backend.database.mongo_manager import get_mongo_manager
 from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
-from backend.services.filesystem_write_service import FilesystemWriteService
 from backend.services.mcp_tool_service import get_mcp_tool_service
 from backend.services.session_cancel_service import get_session_cancel_service
 
@@ -114,6 +115,39 @@ class ChatStreamService:
             memory_text = mongo.get_chat_memory(thread_id=thread_id, assistant_id=assistant_id)
         except Exception:
             memory_text = ""
+
+        def save_filesystem_write(file_path: str, content: str, title: str = "") -> dict[str, Any]:
+            """保存文档内容到 MongoDB（用于前端文档卡片）。
+
+            Args:
+                file_path: 文件路径（用于标识）
+                content: 文件内容
+                title: 文档标题（可选）
+
+            Returns:
+                包含 status/write_id/title/type 的字典
+            """
+            try:
+                safe_path = str(file_path or "")
+                filename = Path(safe_path).name
+                file_type = Path(safe_path).suffix.lstrip(".") or "txt"
+                safe_title = str(title or "").strip() or filename
+                metadata = {"title": safe_title, "type": file_type}
+
+                write_id = mongo.save_filesystem_write(
+                    session_id=thread_id,
+                    file_path=safe_path,
+                    content=str(content or ""),
+                    metadata=metadata,
+                )
+                return {
+                    "status": "success",
+                    "write_id": write_id,
+                    "title": safe_title,
+                    "type": file_type,
+                }
+            except Exception as e:
+                return {"status": "error", "message": f"save_filesystem_write failed: {str(e)}"}
 
         # 组装系统提示词：沙箱环境指南 + 引用规则 + 文件写入规则
         extra_system_prompt = ""
@@ -233,9 +267,8 @@ class ChatStreamService:
                     str(_mcp_exc),
                 )
 
-            # 创建自定义文件写入工具（用于将文件内容写入 MongoDB）
-            fs_write_service = FilesystemWriteService(session_id=thread_id)
-            custom_write_file = fs_write_service.create_write_file_tool()
+            # 注入 MongoDB 文档入库工具：用于在 write_file 之后保存文档卡片
+            tools.append(save_filesystem_write)
 
             # 创建 OpenSandbox 远程沙箱（如果配置可用）
             # 说明：沙箱用于执行代码、操作文件系统、运行技能等，提供安全的隔离环境
@@ -275,20 +308,37 @@ class ChatStreamService:
             # 关键逻辑：如果没有拿到沙箱，则用项目目录作为工作区根目录
             effective_workspace_root = self._sandbox_root if sandbox_backend is not None else self._base_dir
 
-            # 创建 deepagents agent（通过工厂方法统一处理 backend、skills、工具等）
-            agent, _backend = create_agent(
+            # 关键逻辑：按官方推荐，直接调用 deepagents.create_deep_agent
+            backend = (
+                sandbox_backend
+                if sandbox_backend is not None
+                else FilesystemBackend(root_dir=str(effective_workspace_root))
+            )
+
+            skills = ["/workspace/skills/skills"] if sandbox_backend is not None else ["/skills/skills"]
+
+            research_subagent: SubAgent = {
+                "name": "research-analyst",
+                "description": "用于深度调研类任务：把问题拆分成多个子问题，基于工具搜索/抓取信息并输出结构化结论。",
+                "system_prompt": (
+                    "你是一个研究分析子智能体。你的任务是独立完成一个明确的调研子问题，并输出可直接被主智能体引用的结论。\n"
+                    "要求：\n"
+                    "1. 优先使用 web_search 获取最新信息；必要时再用 fetch_url 抓取页面详细内容。\n"
+                    "2. 输出要包含：关键结论、要点列表、以及来源 URL（尽量精确到页面）。\n"
+                    "3. 只回答被分配的子问题，不要扩展到其它方向。"
+                ),
+                "tools": [*tools, rag_prep.rag_tool],
+            }
+
+            agent = create_deep_agent(
                 model=model,
-                assistant_id=assistant_id,
-                tools=[*tools, rag_prep.rag_tool, custom_write_file],
-                workspace_root=effective_workspace_root,
-                sandbox=sandbox_backend,
-                sandbox_type=sandbox_type,
-                rag_source_files=[str(x) for x in file_refs] if isinstance(file_refs, list) else None,
-                extra_system_prompt=extra_system_prompt,
+                tools=[*tools, rag_prep.rag_tool],
+                system_prompt=extra_system_prompt,
                 checkpointer=checkpointer,
-                auto_approve=True,
-                enable_rag=False,
-                enable_shell=False,  # OpenSandbox 模式下禁用本地 shell
+                backend=backend,
+                skills=skills,
+                interrupt_on={},
+                subagents=[research_subagent],
             )
 
             from backend.utils.snowflake import generate_snowflake_id

@@ -11,6 +11,8 @@ from bson.objectid import ObjectId
 from pymongo import MongoClient
 from pymongo import ReturnDocument
 
+from backend.utils.snowflake import generate_snowflake_id
+
 
 # 东八区北京时区
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -557,6 +559,24 @@ class MongoDbManager:
         }
         result = self._filesystem_writes_collection().insert_one(doc)
         return str(result.inserted_id)
+
+    def save_filesystem_write(
+        self,
+        *,
+        session_id: str,
+        file_path: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        write_id = str(generate_snowflake_id())
+        self.create_filesystem_write(
+            write_id=write_id,
+            session_id=session_id,
+            file_path=file_path,
+            content=content,
+            metadata=metadata,
+        )
+        return write_id
 
     def get_filesystem_write(self, *, write_id: str, session_id: str) -> dict[str, Any] | None:
         doc = self._filesystem_writes_collection().find_one(
