@@ -2688,7 +2688,12 @@ function ToolMessage({
   args?: unknown;
   output?: unknown;
 }) {
-  const [isOpen, setIsOpen] = useState(status === "running");
+  const [isOpen, setIsOpen] = useState(() => {
+    // 说明：history 回放时，很多工具消息默认是 done 状态；如果默认折叠，用户会觉得“没渲染结果”。
+    // 这里对常见“需要看结果”的工具默认展开。
+    if (status === "running") return true;
+    return ["web_search", "rag_query", "fetch_url", "read_url_content", "write_file", "write_to_file"].includes(toolName);
+  });
 
   // Debug: 输出完整的 props 信息
   console.log('ToolMessage props:', { toolName, status, args, output });
