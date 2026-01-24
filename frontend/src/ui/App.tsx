@@ -237,6 +237,7 @@ function App() {
   const [podcastSourcesLoading, setPodcastSourcesLoading] = useState(false);
   const [podcastRuns, setPodcastRuns] = useState<PodcastRunSummary[]>([]);
   const [podcastRunDetailOpen, setPodcastRunDetailOpen] = useState(false);
+  const [deletePodcastRunId, setDeletePodcastRunId] = useState<string | null>(null);
   const [podcastRunDetail, setPodcastRunDetail] = useState<PodcastRunDetail | null>(null);
   const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
 
@@ -495,6 +496,31 @@ function App() {
     }
     const data = (await resp.json()) as { results?: PodcastRunSummary[] };
     setPodcastRuns(Array.isArray(data.results) ? data.results : []);
+  };
+
+  const requestDeletePodcastRun = (runId: string) => {
+    setDeletePodcastRunId(runId);
+  };
+
+  const confirmDeletePodcastRun = async () => {
+    const runId = deletePodcastRunId;
+    if (!runId) return;
+
+    setDeletePodcastRunId(null);
+
+    const resp = await fetch(`/api/podcast/runs/${encodeURIComponent(runId)}`, {
+      method: "DELETE",
+    });
+    if (!resp.ok) {
+      return;
+    }
+
+    await fetchPodcastRuns();
+
+    if (podcastRunDetailOpen && podcastRunDetail?.run?.run_id === runId) {
+      setPodcastRunDetailOpen(false);
+      setPodcastRunDetail(null);
+    }
   };
 
   const fetchPodcastSources = async (q: string) => {
@@ -2035,14 +2061,57 @@ function App() {
                       key={r.run_id}
                       class="note-item"
                       onClick={() => void openPodcastRunDetail(r.run_id)}
-                      style={{ cursor: "pointer" }}
+                      style={{
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
                     >
-                      <div class="note-icon"><Icons.Sound /></div>
-                      <div class="note-content">
-                        <div class="note-title">{r.episode_name}</div>
-                        <div class="note-meta">{r.created_at} • {r.status}</div>
-                      </div>
-                      <div class="note-action"><Icons.ChevronRight /></div>
+                      {(() => {
+                        const isDeleting = deletePodcastRunId === r.run_id;
+                        return (
+                          <>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                              <div class="note-icon"><Icons.Sound /></div>
+                              <div class="note-content">
+                                <div class="note-title" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {r.episode_name}
+                                </div>
+                                <div class="note-meta">{r.created_at} • {r.status}</div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: isDeleting ? "#1f2937" : "#9ca3af",
+                                fontSize: 18,
+                                cursor: "pointer",
+                                padding: 4,
+                                lineHeight: 1,
+                                transition: "color 0.2s",
+                                animation: isDeleting ? "shake 0.5s ease-in-out infinite" : "none",
+                              }}
+                              onMouseEnter={(e) => !isDeleting && (e.currentTarget.style.color = "#ef4444")}
+                              onMouseLeave={(e) => !isDeleting && (e.currentTarget.style.color = "#9ca3af")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isDeleting) {
+                                  void confirmDeletePodcastRun();
+                                } else {
+                                  requestDeletePodcastRun(r.run_id);
+                                }
+                              }}
+                              aria-label="删除运行记录"
+                            >
+                              ×
+                            </button>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

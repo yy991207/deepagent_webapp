@@ -144,6 +144,28 @@ def podcast_run_detail(run_id: str) -> dict[str, Any]:
     return {"run": detail, "result": result}
 
 
+@router.delete("/api/podcast/runs/{run_id}")
+def podcast_delete_run(run_id: str) -> dict[str, Any]:
+    """删除一条播客运行记录。
+
+    说明：
+    - 删除 runs 集合中的 run 记录
+    - 同时清理 results 集合中对应的结果数据
+    - 不主动删除本地音频文件
+    """
+
+    svc = build_podcast_middleware()
+    try:
+        deleted = svc.delete_run(run_id=run_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+
+    return {"ok": True}
+
+
 @router.get("/api/podcast/results/{run_id}")
 def podcast_result_detail(run_id: str) -> dict[str, Any]:
     svc = build_podcast_middleware()

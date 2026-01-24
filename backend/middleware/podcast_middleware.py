@@ -497,6 +497,30 @@ class PodcastMiddleware:
             "created_at": self._iso(created) if isinstance(created, datetime) else str(created),
         }
 
+    def delete_run(self, *, run_id: str) -> bool:
+        """删除指定的播客运行记录及其结果。
+
+        说明：
+        - 仅删除 MongoDB 中的运行记录和结果数据
+        - 不主动删除本地音频文件，避免误删用户可能复用的资源
+        """
+
+        col_runs = self._col(self._runs_collection)
+        col_results = self._col(self._results_collection)
+
+        try:
+            res = col_runs.delete_one({"run_id": run_id})
+        except Exception:
+            return False
+
+        # 结果表按 run_id 清理即可，删除失败不影响主流程
+        try:
+            col_results.delete_many({"run_id": run_id})
+        except Exception:
+            pass
+
+        return bool(res.deleted_count)
+
     def start_generation_async(self, *, run_id: str) -> None:
         """异步启动播客生成任务。
         
