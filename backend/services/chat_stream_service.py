@@ -30,6 +30,7 @@ from backend.prompts.chat_prompts import (
     sandbox_environment_prompt,
     reference_rules_prompt,
     file_write_rules_prompt,
+    research_task_rules_prompt,
     suggested_questions_prompt,
 )
 
@@ -123,6 +124,7 @@ class ChatStreamService:
             sandbox_environment_prompt(),
             reference_rules_prompt(),
             file_write_rules_prompt(),
+            research_task_rules_prompt(),
         ]
         extra_system_prompt = "\n\n".join(parts).strip()
 

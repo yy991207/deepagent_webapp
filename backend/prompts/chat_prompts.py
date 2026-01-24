@@ -6,6 +6,7 @@
 - 引用规则
 - 文件写入规则
 - 推荐问题生成 prompt
+- 调研类任务的 task 子智能体使用规则提示词
 """
 
 from __future__ import annotations
@@ -147,6 +148,22 @@ def research_output_format_prompt() -> str:
         "- 用户说：帮我调研XX，输出 PDF → 输出 PDF 格式（用户明确指定）\n"
         "- 用户说：用 Markdown 写一份研究报告 → 输出 Markdown 格式（用户明确指定）\n"
         "</research_output_format>"
+    )
+
+
+def research_task_rules_prompt() -> str:
+    """返回调研任务的 task 子智能体使用规则。"""
+    return (
+        "<research_task_rules>\n"
+        "重要：调研类任务的执行规则\n\n"
+        "当用户提出调研/研究/新闻整理/报告类需求时：\n"
+        "1. 不要只描述流程，必须实际调用工具推进任务。\n"
+        "2. 优先使用 task 工具把调研拆分成 2-5 个互不重叠的子问题，并行执行。\n"
+        "3. task 的 subagent_type 固定使用 research-analyst。\n"
+        "4. 子智能体返回后，你再综合所有子结果，输出最终结论/报告。\n\n"
+        "示例：\n"
+        "- 用户要‘最近 3 个月 AI Agent 新闻’，你可以拆成：OpenAI/Anthropic/Google、产品发布、融资并购、风险争议等。\n"
+        "</research_task_rules>"
     )
 
 
