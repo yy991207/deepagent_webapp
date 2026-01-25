@@ -297,28 +297,28 @@ class ChatStreamService:
                 for ev in skills_sync_result.events:
                     yield ev
             except Exception as e:
-                # 沙箱创建失败时自动降级为无沙箱模式，保证主链路可用
-                err_msg = f"OpenSandbox 创建失败，将自动降级为无沙箱模式：{type(e).__name__}: {e}"
+                # 明确要求所有工作都在沙箱中进行，沙箱创建失败时直接报错，不降级
+                err_msg = f"OpenSandbox 创建失败，无法继续：{type(e).__name__}: {e}"
                 logger.exception(err_msg)
-                yield {"type": "sandbox.status", "status": "error", "message": err_msg}
-                sandbox_backend = None
-                sandbox_type = None
+                yield {"type": "error", "message": err_msg}
+                return
 
             logger.debug(
                 f"sandbox ready | thread_id={thread_id} | has_sandbox={sandbox_backend is not None} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
             )
 
-            # 关键逻辑：如果没有拿到沙箱，则用项目目录作为工作区根目录
-            effective_workspace_root = self._sandbox_root if sandbox_backend is not None else self._base_dir
+            # 强制要求所有工作都在沙箱中进行，如果没有沙箱则直接报错
+            if sandbox_backend is None:
+                err_msg = "OpenSandbox 不可用，无法继续工作。请检查 OpenSandbox 服务配置。"
+                logger.error(err_msg)
+                yield {"type": "error", "message": err_msg}
+                return
+
+            effective_workspace_root = self._sandbox_root
 
             # 关键逻辑：按官方推荐，直接调用 deepagents.create_deep_agent
-            backend = (
-                sandbox_backend
-                if sandbox_backend is not None
-                else FilesystemBackend(root_dir=str(effective_workspace_root))
-            )
-
-            skills = ["/workspace/skills/skills"] if sandbox_backend is not None else ["/skills/skills"]
+            backend = sandbox_backend
+            skills = ["/workspace/skills/skills"]
 
             research_subagent: SubAgent = {
                 "name": "research-analyst",

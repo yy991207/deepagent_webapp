@@ -60,7 +60,7 @@ class OpenSandboxBackend(BaseSandbox):
     - 使用 OpenSandbox 的 API 实现 execute() 方法
     """
 
-    def __init__(self, sandbox: Sandbox) -> None:
+    def __init__(self, sandbox: Sandbox, *, owner_loop: asyncio.AbstractEventLoop) -> None:
         """使用 OpenSandbox 实例初始化 OpenSandboxBackend。
 
         参数：
@@ -68,6 +68,9 @@ class OpenSandboxBackend(BaseSandbox):
         """
         self._sandbox = sandbox
         self._timeout = 30 * 60  # 30 分钟默认超时
+        # 关键逻辑：OpenSandbox SDK 的底层网络客户端与事件循环强绑定。
+        # 这里记录“创建 sandbox 时所在的事件循环”，后续所有同步方法都调度回这个 loop 执行，避免跨 loop 报错。
+        self._owner_loop = owner_loop
 
     @property
     def id(self) -> str:
@@ -83,33 +86,17 @@ class OpenSandboxBackend(BaseSandbox):
         返回：
             包含合并输出、退出码和截断标志的 ExecuteResponse
         """
+        # 关键逻辑：无论调用方是否在事件循环里，这里都把执行调度到 owner_loop，保证与 Sandbox 创建时一致。
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
-            return self._execute_sync(command)
-
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._execute_sync, command)
-                return future.result()
-        else:
-            return loop.run_until_complete(self._aexecute(command))
-
-    def _execute_sync(self, command: str) -> ExecuteResponse:
-        """使用新事件循环的同步执行辅助方法。"""
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._aexecute(command))
-        finally:
-            try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.run_until_complete(loop.shutdown_default_executor())
-            except Exception:
-                pass
-            loop.close()
+            future = asyncio.run_coroutine_threadsafe(self._aexecute(command), self._owner_loop)
+            return future.result(timeout=self._timeout)
+        except Exception as e:
+            logger.error(f"OpenSandbox execute error: {e}")
+            return ExecuteResponse(
+                output=f"Error executing command: {e}",
+                exit_code=1,
+                truncated=False,
+            )
 
     async def _aexecute(self, command: str) -> ExecuteResponse:
         """执行方法的异步实现。"""
@@ -189,32 +176,11 @@ except PermissionError:
             FileDownloadResponse 对象列表，每个输入路径对应一个
         """
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
-            return self._download_files_sync(paths)
-
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._download_files_sync, paths)
-                return future.result()
-        else:
-            return loop.run_until_complete(self._adownload_files(paths))
-
-    def _download_files_sync(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """使用新事件循环的同步下载辅助方法。"""
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._adownload_files(paths))
-        finally:
-            try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.run_until_complete(loop.shutdown_default_executor())
-            except Exception:
-                pass
-            loop.close()
+            future = asyncio.run_coroutine_threadsafe(self._adownload_files(paths), self._owner_loop)
+            return future.result(timeout=self._timeout)
+        except Exception as e:
+            logger.error(f"OpenSandbox download error: {e}")
+            return [FileDownloadResponse(path=p, content=None, error="download_failed") for p in paths]
 
     async def _adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """下载文件方法的异步实现。"""
@@ -244,32 +210,11 @@ except PermissionError:
             FileUploadResponse 对象列表，每个输入文件对应一个
         """
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 关键逻辑：当前线程没有事件循环（常见于 ThreadPoolExecutor），直接走同步封装
-            return self._upload_files_sync(files)
-
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self._upload_files_sync, files)
-                return future.result()
-        else:
-            return loop.run_until_complete(self._aupload_files(files))
-
-    def _upload_files_sync(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """使用新事件循环的同步上传辅助方法。"""
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._aupload_files(files))
-        finally:
-            try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.run_until_complete(loop.shutdown_default_executor())
-            except Exception:
-                pass
-            loop.close()
+            future = asyncio.run_coroutine_threadsafe(self._aupload_files(files), self._owner_loop)
+            return future.result(timeout=self._timeout)
+        except Exception as e:
+            logger.error(f"OpenSandbox upload error: {e}")
+            return [FileUploadResponse(path=p, error="upload_failed") for p, _ in files]
 
     async def _aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """上传文件方法的异步实现。"""
@@ -407,7 +352,7 @@ class OpenSandboxManager:
                 image=image,
                 timeout_seconds=timeout_seconds,
             )
-            backend = OpenSandboxBackend(sandbox)
+            backend = OpenSandboxBackend(sandbox, owner_loop=asyncio.get_running_loop())
 
             self._sandboxes[session_id] = sandbox
             self._backends[session_id] = backend
