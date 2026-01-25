@@ -130,6 +130,7 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
         raise HTTPException(status_code=404, detail="write not found")
 
     content = write.get("content", "")
+    binary_content = write.get("binary_content")  # 新增：获取二进制内容
     file_path = write.get("file_path", "")
     metadata = write.get("metadata", {})
     file_type = metadata.get("type", "").lower()
@@ -174,12 +175,18 @@ def download_filesystem_write(write_id: str, session_id: str) -> Response:
     # 确定 media_type 和是否需要 Base64 解码
     if file_type in BINARY_TYPES:
         media_type = BINARY_TYPES[file_type]
-        try:
-            # 二进制文件：Base64 解码
-            content_bytes = base64.b64decode(content)
-        except Exception:
-            # 如果解码失败，尝试直接使用原始内容
-            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        # 优先使用 binary_content 字段（新的存储方式）
+        if binary_content:
+            try:
+                content_bytes = base64.b64decode(binary_content)
+            except Exception:
+                content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        else:
+            # 兼容旧数据：尝试从 content 字段解码
+            try:
+                content_bytes = base64.b64decode(content)
+            except Exception:
+                content_bytes = content.encode("utf-8") if isinstance(content, str) else content
     elif file_type in TEXT_TYPES:
         media_type = TEXT_TYPES[file_type]
         content_bytes = content.encode("utf-8") if isinstance(content, str) else content

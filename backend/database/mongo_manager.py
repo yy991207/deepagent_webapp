@@ -624,8 +624,22 @@ class MongoDbManager:
         session_id: str,
         file_path: str,
         content: str,
+        binary_content: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
+        """创建文件写入记录。
+
+        Args:
+            write_id: 文件写入唯一标识符
+            session_id: 会话标识符
+            file_path: 文件路径
+            content: 文本内容（用于文本文件或作为 fallback）
+            binary_content: 二进制内容的 base64 编码（用于 PDF、图片等二进制文件）
+            metadata: 元数据（title, type, size 等）
+
+        Returns:
+            插入文档的 MongoDB ObjectId 字符串
+        """
         now = get_beijing_time()
         doc: dict[str, Any] = {
             "write_id": write_id,
@@ -635,6 +649,9 @@ class MongoDbManager:
             "metadata": metadata or {},
             "created_at": now,
         }
+        # 只有当存在二进制内容时才添加该字段，避免存储空值浪费空间
+        if binary_content:
+            doc["binary_content"] = binary_content
         result = self._filesystem_writes_collection().insert_one(doc)
         return str(result.inserted_id)
 
@@ -644,19 +661,42 @@ class MongoDbManager:
         session_id: str,
         file_path: str,
         content: str,
+        binary_content: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
+        """保存文件写入记录的便捷方法。
+
+        Args:
+            session_id: 会话标识符
+            file_path: 文件路径
+            content: 文本内容
+            binary_content: 二进制内容的 base64 编码（可选）
+            metadata: 元数据（可选）
+
+        Returns:
+            生成的 write_id
+        """
         write_id = str(generate_snowflake_id())
         self.create_filesystem_write(
             write_id=write_id,
             session_id=session_id,
             file_path=file_path,
             content=content,
+            binary_content=binary_content,
             metadata=metadata,
         )
         return write_id
 
     def get_filesystem_write(self, *, write_id: str, session_id: str) -> dict[str, Any] | None:
+        """获取单个文件写入记录。
+
+        Args:
+            write_id: 文件写入唯一标识符
+            session_id: 会话标识符
+
+        Returns:
+            文件写入记录字典，包含 binary_content（如果存在），不存在返回 None
+        """
         doc = self._filesystem_writes_collection().find_one(
             {"write_id": write_id, "session_id": session_id}
         )
@@ -669,7 +709,7 @@ class MongoDbManager:
             created = created.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
         created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
 
-        return {
+        result = {
             "write_id": doc.get("write_id"),
             "session_id": doc.get("session_id"),
             "file_path": doc.get("file_path"),
@@ -677,6 +717,10 @@ class MongoDbManager:
             "metadata": doc.get("metadata") or {},
             "created_at": created_at,
         }
+        # 只有当存在二进制内容时才返回该字段
+        if doc.get("binary_content"):
+            result["binary_content"] = doc.get("binary_content")
+        return result
 
     def list_filesystem_writes(self, *, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
         cursor = (
@@ -695,6 +739,11 @@ class MongoDbManager:
             created_at = created.isoformat() if hasattr(created, "isoformat") else str(created)
             metadata = doc.get("metadata") or {}
 
+            # 计算文件大小：优先使用 metadata 中的 size，否则使用 content 长度
+            file_size = metadata.get("size")
+            if file_size is None:
+                file_size = len(doc.get("content") or "")
+
             out.append(
                 {
                     "write_id": doc.get("write_id"),
@@ -702,7 +751,8 @@ class MongoDbManager:
                     "file_path": doc.get("file_path"),
                     "title": metadata.get("title") or doc.get("file_path", "").split("/")[-1],
                     "type": metadata.get("type") or "unknown",
-                    "size": len(doc.get("content") or ""),
+                    "size": file_size,
+                    "has_binary": metadata.get("has_binary", False),
                     "created_at": created_at,
                 }
             )

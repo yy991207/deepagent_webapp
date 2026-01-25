@@ -200,6 +200,25 @@ except PermissionError:
         """下载文件方法的异步版本。"""
         return await self._adownload_files(paths)
 
+    async def aread_bytes(self, path: str) -> bytes:
+        """从 sandbox 读取二进制文件内容。
+
+        说明：
+        - 使用 OpenSandbox SDK 的 read_bytes 方法直接读取二进制数据
+        - 适用于 PDF、图片、Office 文档等二进制文件
+        - 对于文本文件，建议使用 read_file 方法
+
+        Args:
+            path: sandbox 中的文件路径
+
+        Returns:
+            文件的二进制内容（bytes）
+
+        Raises:
+            Exception: 如果文件不存在或读取失败
+        """
+        return await self._sandbox.files.read_bytes(path)
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """上传多个文件到 OpenSandbox。
 

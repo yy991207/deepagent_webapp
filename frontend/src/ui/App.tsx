@@ -275,7 +275,7 @@ function App() {
   const [filesystemWrites, setFilesystemWrites] = useState<FilesystemWrite[]>([]);
   const [writeDetailOpen, setWriteDetailOpen] = useState(false);
   const [writeDetailFullscreen, setWriteDetailFullscreen] = useState(false);
-  const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; title: string; file_type?: string; file_path?: string} | null>(null);
+  const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; binary_content?: string; title: string; file_type?: string; file_path?: string} | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
@@ -1840,6 +1840,7 @@ function App() {
                                       setWriteDetail({
                                         write_id: w.write_id,
                                         content: data.content || "",
+                                        binary_content: data.binary_content || "",
                                         title: w.title,
                                         file_type: data.metadata?.type || "",
                                         file_path: data.file_path || "",
@@ -2544,9 +2545,14 @@ function App() {
                   <div style={{ maxHeight: "calc(100vh - 150px)", overflow: "auto" }}>
                     {(() => {
                       const fileType = writeDetail.file_type?.toLowerCase() || "";
+                      // 获取二进制内容（优先使用 binary_content，兼容旧数据用 content）
+                      const binaryData = writeDetail.binary_content || writeDetail.content;
                       // PDF 文件：使用 embed 标签渲染
                       if (fileType === "pdf") {
-                        const pdfDataUrl = `data:application/pdf;base64,${writeDetail.content}`;
+                        if (!binaryData) {
+                          return <div class="ref-muted">PDF 内容为空</div>;
+                        }
+                        const pdfDataUrl = `data:application/pdf;base64,${binaryData}`;
                         return (
                           <embed
                             src={pdfDataUrl}
@@ -2557,8 +2563,11 @@ function App() {
                       }
                       // 图片文件：使用 img 标签渲染
                       if (["png", "jpg", "jpeg", "gif", "webp"].includes(fileType)) {
+                        if (!binaryData) {
+                          return <div class="ref-muted">图片内容为空</div>;
+                        }
                         const mimeType = fileType === "jpg" ? "jpeg" : fileType;
-                        const imgDataUrl = `data:image/${mimeType};base64,${writeDetail.content}`;
+                        const imgDataUrl = `data:image/${mimeType};base64,${binaryData}`;
                         return (
                           <img
                             src={imgDataUrl}

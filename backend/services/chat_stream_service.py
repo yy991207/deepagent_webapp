@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from pathlib import Path
@@ -117,39 +118,6 @@ class ChatStreamService:
             memory_text = mongo.get_chat_memory(thread_id=thread_id, assistant_id=assistant_id)
         except Exception:
             memory_text = ""
-
-        def save_filesystem_write(file_path: str, content: str, title: str = "") -> dict[str, Any]:
-            """保存文档内容到 MongoDB（用于前端文档卡片）。
-
-            Args:
-                file_path: 文件路径（用于标识）
-                content: 文件内容
-                title: 文档标题（可选）
-
-            Returns:
-                包含 status/write_id/title/type 的字典
-            """
-            try:
-                safe_path = str(file_path or "")
-                filename = Path(safe_path).name
-                file_type = Path(safe_path).suffix.lstrip(".") or "txt"
-                safe_title = str(title or "").strip() or filename
-                metadata = {"title": safe_title, "type": file_type}
-
-                write_id = mongo.save_filesystem_write(
-                    session_id=thread_id,
-                    file_path=safe_path,
-                    content=str(content or ""),
-                    metadata=metadata,
-                )
-                return {
-                    "status": "success",
-                    "write_id": write_id,
-                    "title": safe_title,
-                    "type": file_type,
-                }
-            except Exception as e:
-                return {"status": "error", "message": f"save_filesystem_write failed: {str(e)}"}
 
         # 组装系统提示词：沙箱环境指南 + 引用规则 + 文件写入规则
         extra_system_prompt = ""
@@ -270,9 +238,6 @@ class ChatStreamService:
                     str(_mcp_exc),
                 )
 
-            # 注入 MongoDB 文档入库工具：用于在 write_file 之后保存文档卡片
-            tools.append(save_filesystem_write)
-
             # 创建 OpenSandbox 远程沙箱（如果配置可用）
             # 说明：沙箱用于执行代码、操作文件系统、运行技能等，提供安全的隔离环境
             sandbox_backend = None
@@ -315,6 +280,83 @@ class ChatStreamService:
                 return
 
             effective_workspace_root = self._sandbox_root
+
+            # 二进制文件类型列表（需要从 sandbox 下载实际二进制内容）
+            BINARY_FILE_TYPES = {'.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.gif', '.zip', '.tar', '.gz'}
+
+            def save_filesystem_write(file_path: str, content: str = "", title: str = "") -> dict[str, Any]:
+                """保存文档内容到 MongoDB（用于前端文档卡片）。
+
+                说明：
+                - 对于二进制文件（PDF、图片、Office 文档等），会自动从 sandbox 下载实际的二进制数据
+                - 二进制数据以 base64 编码存储在 MongoDB 中
+                - 对于文本文件，只存储传入的 content 参数
+
+                Args:
+                    file_path: sandbox 中的文件路径
+                    content: 文本内容（用于文本文件或作为 fallback）
+                    title: 文档标题（可选）
+
+                Returns:
+                    包含 status/write_id/title/type 的字典
+                """
+                try:
+                    import asyncio
+
+                    safe_path = str(file_path or "")
+                    filename = Path(safe_path).name
+                    file_ext = Path(safe_path).suffix.lower()
+                    file_type = file_ext.lstrip(".") or "txt"
+                    safe_title = str(title or "").strip() or filename
+
+                    binary_content: str | None = None
+                    file_size: int | None = None
+
+                    # 对于二进制文件类型，从 sandbox 下载实际的二进制数据
+                    if file_ext in BINARY_FILE_TYPES and sandbox_backend is not None:
+                        try:
+                            # 使用 run_coroutine_threadsafe 调度异步下载操作
+                            # 因为 save_filesystem_write 被注册为同步工具
+                            future = asyncio.run_coroutine_threadsafe(
+                                sandbox_backend.aread_bytes(safe_path),
+                                sandbox_backend._owner_loop
+                            )
+                            file_bytes = future.result(timeout=60)  # 60 秒超时
+                            binary_content = base64.b64encode(file_bytes).decode('utf-8')
+                            file_size = len(file_bytes)
+                            logger.info(f"从 sandbox 下载二进制文件成功: {safe_path}, size={file_size}")
+                        except Exception as e:
+                            # 下载失败时降级为只存储文本内容，不阻塞整个流程
+                            logger.warning(f"从 sandbox 下载二进制文件失败，降级为文本存储: {safe_path}, error={e}")
+
+                    metadata = {
+                        "title": safe_title,
+                        "type": file_type,
+                    }
+                    if file_size is not None:
+                        metadata["size"] = file_size
+                    if binary_content:
+                        metadata["has_binary"] = True
+
+                    write_id = mongo.save_filesystem_write(
+                        session_id=thread_id,
+                        file_path=safe_path,
+                        content=str(content or ""),
+                        binary_content=binary_content,
+                        metadata=metadata,
+                    )
+                    return {
+                        "status": "success",
+                        "write_id": write_id,
+                        "title": safe_title,
+                        "type": file_type,
+                    }
+                except Exception as e:
+                    logger.exception(f"save_filesystem_write failed: {e}")
+                    return {"status": "error", "message": f"save_filesystem_write failed: {str(e)}"}
+
+            # 注入 MongoDB 文档入库工具：用于在 write_file 之后保存文档卡片
+            tools.append(save_filesystem_write)
 
             # 关键逻辑：按官方推荐，直接调用 deepagents.create_deep_agent
             backend = sandbox_backend

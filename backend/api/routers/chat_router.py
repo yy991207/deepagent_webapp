@@ -301,3 +301,123 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
     )
 
 
+@router.get("/api/chat/file/{write_id}/download")
+def download_filesystem_write(write_id: str, session_id: str) -> Any:
+    """下载文件写入记录中的文件。
+
+    说明：
+    - 对于二进制文件（PDF、图片、Office 文档等），返回解码后的二进制数据
+    - 对于文本文件，返回文本内容
+    - 支持浏览器直接下载
+
+    Args:
+        write_id: 文件写入唯一标识符
+        session_id: 会话标识符
+
+    Returns:
+        文件内容（StreamingResponse 或 JSON）
+    """
+    import base64
+    from io import BytesIO
+
+    mongo = get_mongo_manager()
+
+    try:
+        record = mongo.get_filesystem_write(write_id=write_id, session_id=session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
+
+    if not record:
+        raise HTTPException(status_code=404, detail="file not found")
+
+    file_path = record.get("file_path") or ""
+    filename = Path(file_path).name or "download"
+    metadata = record.get("metadata") or {}
+    file_type = metadata.get("type") or Path(file_path).suffix.lstrip(".") or "txt"
+
+    # 如果有二进制内容，返回解码后的二进制数据
+    binary_content = record.get("binary_content")
+    if binary_content:
+        try:
+            file_bytes = base64.b64decode(binary_content)
+            file_stream = BytesIO(file_bytes)
+
+            # 根据文件类型设置 MIME 类型
+            mime_types = {
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "png": "image/png",
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "gif": "image/gif",
+                "zip": "application/zip",
+                "tar": "application/x-tar",
+                "gz": "application/gzip",
+            }
+            media_type = mime_types.get(file_type.lower(), "application/octet-stream")
+
+            return StreamingResponse(
+                file_stream,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(file_bytes)),
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"failed to decode binary content: {exc}") from exc
+
+    # 如果没有二进制内容，返回文本内容
+    content = record.get("content") or ""
+    return {
+        "write_id": write_id,
+        "session_id": session_id,
+        "file_path": file_path,
+        "filename": filename,
+        "type": file_type,
+        "content": content,
+        "has_binary": False,
+    }
+
+
+@router.get("/api/chat/file/{write_id}")
+def get_filesystem_write_info(write_id: str, session_id: str) -> dict[str, Any]:
+    """获取文件写入记录的元信息（不含二进制内容）。
+
+    说明：
+    - 用于前端展示文件卡片时获取文件信息
+    - 不返回 binary_content 字段以减少传输量
+
+    Args:
+        write_id: 文件写入唯一标识符
+        session_id: 会话标识符
+
+    Returns:
+        文件元信息字典
+    """
+    mongo = get_mongo_manager()
+
+    try:
+        record = mongo.get_filesystem_write(write_id=write_id, session_id=session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed to query mongo") from exc
+
+    if not record:
+        raise HTTPException(status_code=404, detail="file not found")
+
+    file_path = record.get("file_path") or ""
+    metadata = record.get("metadata") or {}
+
+    return {
+        "write_id": record.get("write_id"),
+        "session_id": record.get("session_id"),
+        "file_path": file_path,
+        "filename": Path(file_path).name,
+        "type": metadata.get("type") or Path(file_path).suffix.lstrip(".") or "txt",
+        "title": metadata.get("title") or Path(file_path).name,
+        "size": metadata.get("size"),
+        "has_binary": metadata.get("has_binary", False),
+        "created_at": record.get("created_at"),
+    }
