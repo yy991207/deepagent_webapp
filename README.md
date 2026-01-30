@@ -147,7 +147,7 @@
 - **验证**：启动服务后发起聊天，观察后端日志是否出现 `MCP tools loaded | tools_count=...`
  
  ## 启动与停止
- 
+
  统一使用根目录脚本：
  ```bash
  bash start_web_stack.sh start
@@ -155,14 +155,82 @@
  bash start_web_stack.sh logs
  bash start_web_stack.sh stop
  ```
- 
+
+### 服务架构
+
+系统包含以下服务组件：
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| 后端 (backend) | 7777 | FastAPI 主服务 |
+| 前端 (frontend) | 5173 | Vite + Preact 开发服务器 |
+| Celery Worker | - | 任务队列工作进程 |
+| Celery Beat | - | 定时任务调度器 |
+| Podcast Agent | 8888 | 播客生成执行服务 |
+
+### 服务管理命令
+
+```bash
+# 启动全部服务
+./start_web_stack.sh start
+
+# 启动单个服务
+./start_web_stack.sh start backend
+./start_web_stack.sh start frontend
+./start_web_stack.sh start celery          # Worker + Beat
+./start_web_stack.sh start celery-worker   # 仅 Worker
+./start_web_stack.sh start celery-beat     # 仅 Beat
+./start_web_stack.sh start podcast-agent   # 播客生成服务
+
+# 停止服务（同上，把 start 换成 stop）
+./start_web_stack.sh stop
+./start_web_stack.sh stop celery
+
+# 重启服务（同上，把 start 换成 restart）
+./start_web_stack.sh restart podcast-agent
+
+# 查看服务状态
+./start_web_stack.sh status
+
+# 查看日志（交互式菜单）
+./start_web_stack.sh logs
+
+# 查看全部日志（合并）
+./start_web_stack.sh logs-all
+```
+
+### 播客生成架构（投递 + Callback 模式）
+
+```
+API → Celery Worker（快速投递）→ Podcast Agent（异步执行）→ Callback
+```
+
+- **Celery Worker**：接收播客生成请求，快速投递到 Podcast Agent
+- **Podcast Agent**：独立进程执行播客生成（LLM 大纲 + TTS 语音合成）
+- **Callback**：生成完成后回调通知 API 更新状态
+
+### 环境变量
+
+```bash
+# Celery 配置
+CELERY_CONCURRENCY=4         # Worker 并发数（默认 4）
+CELERY_LOG_LEVEL=info        # 日志级别（默认 info）
+
+# Podcast Agent 配置
+PODCAST_AGENT_PORT=8888      # 服务端口（默认 8888）
+```
+
  默认端口：
  - 后端：`http://127.0.0.1:7777`
  - 前端：`http://127.0.0.1:5173`
- 
+ - Podcast Agent：`http://127.0.0.1:8888`
+
  日志位置：
  - `.runtime/logs/backend.log`
  - `.runtime/logs/frontend.log`
+ - `.runtime/logs/celery_worker.log`
+ - `.runtime/logs/celery_beat.log`
+ - `.runtime/logs/podcast_agent.log`
  
  ## 接口大概有哪些（给你快速对照）
  
