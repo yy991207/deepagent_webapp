@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "jsdom": "^27.0.1",
+    "playwright": "^1.57.0",
+    "pptxgenjs": "^4.0.1",
+    "sharp": "^0.34.5",
+    "yargs": "^18.0.0"
+  }
+}
