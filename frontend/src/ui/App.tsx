@@ -624,26 +624,120 @@ function App() {
       return;
     }
 
-    const payload = {
-      episode_profile: "tech_discussion",
-      speaker_profile: podcastSelectedSpeaker,
-      episode_name: podcastEpisodeName.trim(),
-      source_ids: selectedSourceIds,
-      briefing_suffix: podcastBriefingSuffix.trim() ? podcastBriefingSuffix.trim() : undefined,
+    // 使用新的 Agent API 格式：agent_id, config, meta_info
+    const agentPayload = {
+      agent_id: "podcast",
+      config: {
+        episode_profile: "tech_discussion",
+        speaker_profile: podcastSelectedSpeaker,
+        episode_name: podcastEpisodeName.trim(),
+        source_ids: selectedSourceIds,
+        briefing_suffix: podcastBriefingSuffix.trim() || undefined,
+      },
+      meta_info: {
+        session_id: sessionId,
+        user_id: "web_user",
+      },
     };
 
-    const resp = await fetch("/api/podcast/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      addLog(text || "播客生成触发失败", "error");
-      return;
+    try {
+      // 1. 提交任务到 Agent API
+      const resp = await fetch("/api/agent/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(agentPayload),
+      });
+      
+      if (!resp.ok) {
+        const text = await resp.text();
+        addLog(text || "播客生成触发失败", "error");
+        return;
+      }
+      
+      const result = await resp.json();
+      const taskId = result.task_id;
+      
+      if (!taskId) {
+        addLog("未获取到 task_id", "error");
+        return;
+      }
+      
+      addLog(`播客生成任务已提交 (task_id: ${taskId})`, "info");
+      
+      // 2. 开始轮询任务状态
+      pollTaskStatus(taskId);
+      
+      // 3. 刷新运行历史
+      await fetchPodcastRuns();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "播客生成请求失败";
+      addLog(msg, "error");
     }
-    addLog("已触发播客生成", "info");
-    await fetchPodcastRuns();
+  };
+
+  // 轮询任务状态
+  const pollTaskStatus = async (taskId: string) => {
+    const pollInterval = 3000; // 3秒轮询一次
+    const maxPolls = 200; // 最多轮询200次（约10分钟）
+    let pollCount = 0;
+    
+    const poll = async () => {
+      pollCount++;
+      
+      try {
+        const resp = await fetch(`/api/agent/task/${encodeURIComponent(taskId)}/poll`);
+        
+        if (!resp.ok) {
+          if (pollCount < 3) {
+            // 前几次失败可能是任务还没创建完成，继续轮询
+            setTimeout(poll, pollInterval);
+            return;
+          }
+          addLog(`查询任务状态失败: HTTP ${resp.status}`, "error");
+          return;
+        }
+        
+        const status = await resp.json();
+        const taskStatus = status.status;
+        const message = status.message || "";
+        const progress = status.progress || 0;
+        
+        // 更新日志
+        if (taskStatus === "PENDING") {
+          // 排队中，继续轮询
+        } else if (taskStatus === "STARTED") {
+          addLog(`播客生成中... (${progress}%)`, "info");
+        } else if (taskStatus === "DELIVERED") {
+          addLog(`任务已投递到 Agent (${progress}%)`, "info");
+        } else if (taskStatus === "SUCCESS") {
+          addLog("播客生成完成！", "info");
+          // 刷新运行历史以显示结果
+          await fetchPodcastRuns();
+          return; // 停止轮询
+        } else if (taskStatus === "FAILURE") {
+          addLog(`播客生成失败: ${status.error || "未知错误"}`, "error");
+          return; // 停止轮询
+        } else if (taskStatus === "CANCELLED") {
+          addLog("播客生成已取消", "info");
+          return; // 停止轮询
+        }
+        
+        // 检查是否达到最大轮询次数
+        if (pollCount >= maxPolls) {
+          addLog("轮询超时，请手动刷新查看结果", "error");
+          return;
+        }
+        
+        // 继续轮询
+        setTimeout(poll, pollInterval);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "轮询失败";
+        addLog(`轮询错误: ${msg}`, "error");
+      }
+    };
+    
+    // 开始第一次轮询
+    setTimeout(poll, 1000); // 1秒后开始第一次轮询
   };
 
   const fetchChatHistory = async (sid: string) => {

@@ -1,0 +1,55 @@
+# ==============================================================================
+# Systemd Service 文件 - Celery Beat
+# 
+# 安装: sudo cp celery-beat.service /etc/systemd/system/
+# 启用: sudo systemctl enable celery-beat
+# 启动: sudo systemctl start celery-beat
+# ==============================================================================
+
+[Unit]
+Description=Celery Beat Scheduler for Podcast Generation
+After=network.target redis.service celery-worker.service
+Wants=celery-worker.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/path/to/project
+
+# 环境变量文件（可选）
+EnvironmentFile=-/path/to/project/.env
+
+# 启动命令
+ExecStart=/path/to/project/venv/bin/celery -A backend.celery_scheduler beat \
+    --loglevel=info \
+    --schedule=/path/to/project/run/celerybeat-schedule \
+    --detach \
+    --pidfile=/path/to/project/run/celery_beat.pid \
+    --logfile=/path/to/project/logs/celery_beat.log
+
+# 停止命令
+ExecStop=/bin/kill -s TERM $MAINPID
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# PID 文件
+PIDFile=/path/to/project/run/celery_beat.pid
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 超时设置
+TimeoutStartSec=30
+TimeoutStopSec=60
+
+# 资源限制
+LimitNOFILE=1024
+LimitNPROC=1024
+
+# 安全设置
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

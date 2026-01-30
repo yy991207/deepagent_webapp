@@ -1,0 +1,22 @@
+{
+  "agents": [
+    {
+      "agent_id": "podcast",
+      "name": "Podcast Generation Agent",
+      "type": "podcast",
+      "url": "http://localhost:8888",
+      "endpoints": {
+        "run": "/api/agent/run",
+        "cancel": "/api/agent/cancel",
+        "health": "/health"
+      },
+      "timeout": 30,
+      "retries": 3,
+      "enabled": true,
+      "metadata": {
+        "description": "播客生成服务，支持多人对话音频生成"
+      }
+    }
+  ],
+  "_comment": "添加新 Agent 时，复制上面的配置块并修改相应字段"
+}

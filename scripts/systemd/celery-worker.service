@@ -1,0 +1,57 @@
+# ==============================================================================
+# Systemd Service 文件 - Celery Worker
+# 
+# 安装: sudo cp celery-worker.service /etc/systemd/system/
+# 启用: sudo systemctl enable celery-worker
+# 启动: sudo systemctl start celery-worker
+# ==============================================================================
+
+[Unit]
+Description=Celery Worker for Podcast Generation
+After=network.target redis.service mongodb.service
+Wants=redis.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/path/to/project
+
+# 环境变量文件（可选）
+EnvironmentFile=-/path/to/project/.env
+
+# 启动命令
+ExecStart=/path/to/project/venv/bin/celery -A backend.celery_scheduler worker \
+    --hostname=podcast_worker@%%h \
+    --concurrency=4 \
+    --loglevel=info \
+    --queues=celery,podcast \
+    --detach \
+    --pidfile=/path/to/project/run/celery_worker.pid \
+    --logfile=/path/to/project/logs/celery_worker.log
+
+# 停止命令
+ExecStop=/bin/kill -s TERM $MAINPID
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# PID 文件
+PIDFile=/path/to/project/run/celery_worker.pid
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 超时设置
+TimeoutStartSec=60
+TimeoutStopSec=600
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=65536
+
+# 安全设置
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
