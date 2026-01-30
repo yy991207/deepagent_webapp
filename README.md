@@ -21,7 +21,7 @@
   - `OPENSANDBOX_API_KEY`/`SANDBOX_API_KEY`：API 密钥
   - `OPENSANDBOX_IMAGE`/`SANDBOX_IMAGE`：自定义 Docker 镜像
   - `OPENSANDBOX_REQUEST_TIMEOUT_SECONDS`/`SANDBOX_REQUEST_TIMEOUT_SECONDS`：请求超时（默认 10 秒）
-- **降级策略**：如果 OpenSandbox 不可用，自动降级为本地文件系统模式
+
  
  ## 项目结构（以当前仓库为准）
  
@@ -30,28 +30,52 @@
  ├── backend/
  │   ├── api/
  │   │   ├── web_app.py                 # FastAPI 应用入口（uvicorn 启动的 app）
- │   │   └── routers/                   # 各业务路由：chat、sources、podcast、filesystem 等
+ │   │   └── routers/
+ │   │       ├── chat_router.py         # 聊天相关路由
+ │   │       ├── sources_router.py      # 文件/素材管理路由
+ │   │       ├── podcast_router.py      # 播客生成路由
+ │   │       ├── agent_router.py        # Agent API 路由（任务提交/状态/回调）
+ │   │       └── filesystem_router.py   # 文件系统操作路由
+ │   ├── celery_scheduler/              # Celery 任务调度模块
+ │   │   ├── __init__.py                # Celery app 导出
+ │   │   ├── celery_app.py              # Celery 应用配置
+ │   │   ├── config.py                  # Celery 配置（broker、backend 等）
+ │   │   ├── registry/                  # Agent 注册表（管理可用 Agent）
+ │   │   ├── storage/                   # 任务存储（MongoDB 持久化）
+ │   │   └── tasks/                     # Celery 任务定义
  │   ├── config/
  │   │   └── deepagents_settings.py     # 运行时配置（从环境变量读取）+ create_model()
  │   ├── database/
  │   │   └── mongo_manager.py           # MongoDB 访问封装 + 分布式锁
  │   ├── middleware/
  │   │   ├── rag_middleware.py          # RAG 中间件（LlamaIndex）
- │   │   └── podcast_middleware.py      # 播客生成任务
+ │   │   └── podcast_middleware.py      # 播客生成中间件
  │   ├── prompts/
  │   │   ├── chat_prompts.py            # 聊天相关 prompt 统一管理
  │   │   └── memory_summary_prompts.py  # memory 总结 prompt
- │   ├── services/                      # 业务服务层（chat、source、opensandbox 等）
+ │   ├── services/
+ │   │   ├── chat_service.py            # 聊天业务逻辑
+ │   │   ├── source_service.py          # 文件/素材业务逻辑
+ │   │   ├── opensandbox_service.py     # OpenSandbox 远程沙箱服务
+ │   │   └── podcast_agent_service.py   # 播客 Agent 独立服务（FastAPI，端口 8888）
  │   ├── utils/                         # 工具函数（snowflake、tools 等）
  │   └── main.py                        #（如存在）后端模块入口/调试入口
  ├── frontend/
  │   ├── src/
+ │   │   └── ui/
+ │   │       ├── App.tsx                # 主应用组件
+ │   │       └── types/                 # TypeScript 类型定义
  │   └── package.json
  ├── skills/                            # deepagents skills（会同步到 sandbox 的 /workspace/skills/skills）
+ ├── scripts/                           # 辅助脚本（测试、调试等）
+ ├── plans/                             # 设计文档和实现计划
  ├── doc/                               # 工作记录等文档
  ├── .env                               # 本地环境变量（启动时会被加载）
+ ├── .runtime/                          # 运行时目录（自动生成）
+ │   ├── pids/                          # 各服务 PID 文件
+ │   └── logs/                          # 各服务日志文件
  ├── requirements.txt                   # Python 依赖
- ├── start_web_stack.sh                 # 一键启动/停止/看日志
+ ├── start_web_stack.sh                 # 一键启动/停止/看日志（支持单服务管理）
  └── uvicorn_log_config.yaml            # uvicorn 日志配置
  ```
  
@@ -59,6 +83,7 @@
  - Python 3.11+
  - Node.js 18+
  - MongoDB 5.0+
+ - Redis 6.0+（Celery 消息队列需要）
  - 建议使用 conda 环境：`deepagent`
  
  ## 安装依赖
@@ -108,13 +133,20 @@
  - `RAG_PROVIDER`：embedding 提供商（dashscope/openai/huggingface 等，按你代码支持为准）
  
  ### 播客相关（可选）
+ - `DEEPAGENTS_DATA_DIR`：数据目录（播客音频存放位置）
  - `DEEPAGENTS_PODCAST_RUNS_COLLECTION`
  - `DEEPAGENTS_PODCAST_RESULTS_COLLECTION`
  - `DEEPAGENTS_PODCAST_SPEAKER_PROFILES_COLLECTION`
  - `DEEPAGENTS_PODCAST_EPISODE_PROFILES_COLLECTION`
  - `DEEPAGENTS_LOCKS_COLLECTION`
- - `PODCAST_TTS_PROVIDER`：比如 `edge`/`openai-compatible`
- - `PODCAST_TTS_MODEL`
+ - `PODCAST_LLM_PROVIDER`：LLM 提供商（`openai`/`openai-compatible`）
+ - `PODCAST_LLM_MODEL`：LLM 模型名
+ - `PODCAST_OUTLINE_PROVIDER`/`PODCAST_OUTLINE_MODEL`：大纲生成配置
+ - `PODCAST_TRANSCRIPT_PROVIDER`/`PODCAST_TRANSCRIPT_MODEL`：对话生成配置
+ - `PODCAST_TTS_PROVIDER`：TTS 提供商（`edge`/`openai-compatible`）
+ - `PODCAST_TTS_MODEL`：TTS 模型
+ - `OPENAI_COMPATIBLE_BASE_URL`：OpenAI 兼容接口地址（播客 LLM 使用）
+ - `OPENAI_COMPATIBLE_API_KEY`：OpenAI 兼容接口密钥
 
 ### MCP（可选）
 - `DEEPAGENTS_MCP_ENABLED`：是否启用 MCP（默认启用，设为 `0/false/no/off` 禁用）
@@ -209,15 +241,28 @@ API → Celery Worker（快速投递）→ Podcast Agent（异步执行）→ Ca
 - **Podcast Agent**：独立进程执行播客生成（LLM 大纲 + TTS 语音合成）
 - **Callback**：生成完成后回调通知 API 更新状态
 
-### 环境变量
+### Celery/Redis 环境变量
 
 ```bash
-# Celery 配置
-CELERY_CONCURRENCY=4         # Worker 并发数（默认 4）
-CELERY_LOG_LEVEL=info        # 日志级别（默认 info）
+# Redis 配置
+REDIS_HOST=localhost             # Redis 地址（默认 localhost）
+REDIS_PORT=6379                  # Redis 端口（默认 6379）
+REDIS_PASSWORD=                  # Redis 密码（可选）
+CELERY_BROKER_DB=0               # Broker 使用的 Redis DB（默认 0）
+CELERY_BACKEND_DB=1              # Backend 使用的 Redis DB（默认 1）
+
+# 或直接配置完整 URL
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# Worker 配置
+CELERY_CONCURRENCY=4             # Worker 并发数（默认 4）
+CELERY_LOG_LEVEL=info            # 日志级别（默认 info）
+CELERY_TASK_TIME_LIMIT=1800      # 任务硬超时秒数（默认 30 分钟）
+CELERY_TASK_SOFT_TIME_LIMIT=1500 # 任务软超时秒数（默认 25 分钟）
 
 # Podcast Agent 配置
-PODCAST_AGENT_PORT=8888      # 服务端口（默认 8888）
+PODCAST_AGENT_PORT=8888          # 服务端口（默认 8888）
 ```
 
  默认端口：
@@ -233,13 +278,17 @@ PODCAST_AGENT_PORT=8888      # 服务端口（默认 8888）
  - `.runtime/logs/podcast_agent.log`
  
  ## 接口大概有哪些（给你快速对照）
- 
+
  你可以从 `backend/api/routers/` 里看全量，这里只列常用的：
  - **聊天**：`/api/chat/stream`
  - **聊天记忆统计**：`GET /api/chat/memory/stats`
  - **聊天记忆总结**：`POST /api/chat/memory/summary`
  - **文件/素材**：`/api/sources/*`
  - **播客**：`/api/podcast/*`
+ - **Agent API**（任务调度）：
+   - `POST /api/agent/run`：提交任务（通过 Celery 投递到 Agent）
+   - `GET /api/agent/task/{task_id}/poll`：轮询任务状态
+   - `POST /api/agent/callback`：Agent 执行完成后的回调接口
  
  ## 常见问题
  
