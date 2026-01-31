@@ -503,3 +503,42 @@ def podcast_delete_speaker_profile(profile_id: str) -> dict[str, Any]:
     if not success:
         raise HTTPException(status_code=404, detail="not found")
     return {"ok": True}
+
+
+@router.post("/api/podcast/episode-profiles")
+def podcast_create_episode_profile(payload: dict[str, Any]) -> dict[str, Any]:
+    """创建节目配置"""
+    svc = build_podcast_middleware()
+    try:
+        result = svc.create_episode_profile(data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    return result
+
+
+@router.put("/api/podcast/episode-profiles/{profile_id}")
+def podcast_update_episode_profile(profile_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """更新节目配置"""
+    svc = build_podcast_middleware()
+    try:
+        result = svc.update_episode_profile(profile_id=profile_id, data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    return result
+
+
+@router.delete("/api/podcast/episode-profiles/{profile_id}")
+def podcast_delete_episode_profile(profile_id: str) -> dict[str, Any]:
+    """删除节目配置"""
+    svc = build_podcast_middleware()
+    try:
+        success = svc.delete_episode_profile(profile_id=profile_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    if not success:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}

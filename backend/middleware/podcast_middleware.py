@@ -442,6 +442,81 @@ class PodcastMiddleware:
         result = self._col(self._speaker_profiles_collection).delete_one({"_id": oid})
         return bool(result.deleted_count)
 
+    def create_episode_profile(self, *, data: dict[str, Any]) -> dict[str, Any]:
+        """创建节目配置"""
+        now = self._now()
+        doc = {
+            "name": str(data.get("name") or ""),
+            "description": str(data.get("description") or ""),
+            "speaker_config": str(data.get("speaker_config") or ""),
+            "outline_provider": str(data.get("outline_provider") or "openai-compatible"),
+            "outline_model": str(data.get("outline_model") or "qwen-plus"),
+            "transcript_provider": str(data.get("transcript_provider") or "openai-compatible"),
+            "transcript_model": str(data.get("transcript_model") or "qwen-turbo"),
+            "default_briefing": str(data.get("default_briefing") or ""),
+            "num_segments": int(data.get("num_segments") or 4),
+            "created_at": now,
+            "updated_at": now,
+        }
+        if not doc["name"]:
+            raise ValueError("name is required")
+
+        existing = self._col(self._episode_profiles_collection).find_one({"name": doc["name"]})
+        if existing:
+            raise ValueError(f"episode profile '{doc['name']}' already exists")
+
+        result = self._col(self._episode_profiles_collection).insert_one(doc)
+        return {
+            "id": str(result.inserted_id),
+            **{k: v for k, v in doc.items() if k not in ("created_at", "updated_at")},
+        }
+
+    def update_episode_profile(self, *, profile_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """更新节目配置"""
+        from bson.objectid import ObjectId
+
+        try:
+            oid = ObjectId(profile_id)
+        except Exception:
+            raise ValueError("invalid profile_id")
+
+        existing = self._col(self._episode_profiles_collection).find_one({"_id": oid})
+        if not existing:
+            raise ValueError("profile not found")
+
+        now = self._now()
+        update_doc = {
+            "name": str(data.get("name") or existing.get("name") or ""),
+            "description": str(data.get("description") or ""),
+            "speaker_config": str(data.get("speaker_config") or existing.get("speaker_config") or ""),
+            "outline_provider": str(data.get("outline_provider") or existing.get("outline_provider") or "openai-compatible"),
+            "outline_model": str(data.get("outline_model") or existing.get("outline_model") or "qwen-plus"),
+            "transcript_provider": str(data.get("transcript_provider") or existing.get("transcript_provider") or "openai-compatible"),
+            "transcript_model": str(data.get("transcript_model") or existing.get("transcript_model") or "qwen-turbo"),
+            "default_briefing": str(data.get("default_briefing") or ""),
+            "num_segments": int(data.get("num_segments") or existing.get("num_segments") or 4),
+            "updated_at": now,
+        }
+
+        self._col(self._episode_profiles_collection).update_one(
+            {"_id": oid},
+            {"$set": update_doc}
+        )
+
+        return {"id": profile_id, **update_doc}
+
+    def delete_episode_profile(self, *, profile_id: str) -> bool:
+        """删除节目配置"""
+        from bson.objectid import ObjectId
+
+        try:
+            oid = ObjectId(profile_id)
+        except Exception:
+            return False
+
+        result = self._col(self._episode_profiles_collection).delete_one({"_id": oid})
+        return bool(result.deleted_count)
+
     def list_episode_profiles(self) -> list[dict[str, Any]]:
         """获取所有节目配置列表。
         
