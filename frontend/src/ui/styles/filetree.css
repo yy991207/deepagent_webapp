@@ -7,7 +7,7 @@
   overflow-y: hidden;
   gap: 0;
   height: 100%;
-  border-right: 1px solid rgba(0, 0, 0, 0.08); /* Separator */
+  border-right: 1px solid rgba(0, 0, 0, 0.12); /* Separator - more visible */
 }
 
 .sidebar-header-actions {

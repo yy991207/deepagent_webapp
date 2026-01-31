@@ -3,7 +3,7 @@
   padding: 0;
   gap: 0;
   height: 100%;
-  border-left: 1px solid rgba(0, 0, 0, 0.08); /* Separator */
+  border-left: 1px solid rgba(0, 0, 0, 0.12); /* Separator - more visible */
   background-color: var(--bg-surface);
 }
 
