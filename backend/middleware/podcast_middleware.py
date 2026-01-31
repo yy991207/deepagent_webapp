@@ -367,6 +367,81 @@ class PodcastMiddleware:
             )
         return out
 
+    def create_speaker_profile(self, *, data: dict[str, Any]) -> dict[str, Any]:
+        """创建说话人配置"""
+        now = self._now()
+        doc = {
+            "name": str(data.get("name") or ""),
+            "description": str(data.get("description") or ""),
+            "tts_provider": str(data.get("tts_provider") or "edge"),
+            "tts_model": str(data.get("tts_model") or ""),
+            "speakers": list(data.get("speakers") or []),
+            "created_at": now,
+            "updated_at": now,
+        }
+        if not doc["name"]:
+            raise ValueError("name is required")
+
+        # 检查名称是否重复
+        existing = self._col(self._speaker_profiles_collection).find_one({"name": doc["name"]})
+        if existing:
+            raise ValueError(f"speaker profile '{doc['name']}' already exists")
+
+        result = self._col(self._speaker_profiles_collection).insert_one(doc)
+        return {
+            "id": str(result.inserted_id),
+            "name": doc["name"],
+            "description": doc["description"],
+            "tts_provider": doc["tts_provider"],
+            "tts_model": doc["tts_model"],
+            "speakers": doc["speakers"],
+        }
+
+    def update_speaker_profile(self, *, profile_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """更新说话人配置"""
+        from bson.objectid import ObjectId
+
+        try:
+            oid = ObjectId(profile_id)
+        except Exception:
+            raise ValueError("invalid profile_id")
+
+        existing = self._col(self._speaker_profiles_collection).find_one({"_id": oid})
+        if not existing:
+            raise ValueError("profile not found")
+
+        now = self._now()
+        update_doc = {
+            "name": str(data.get("name") or existing.get("name") or ""),
+            "description": str(data.get("description") or ""),
+            "tts_provider": str(data.get("tts_provider") or existing.get("tts_provider") or "edge"),
+            "tts_model": str(data.get("tts_model") or ""),
+            "speakers": list(data.get("speakers") or existing.get("speakers") or []),
+            "updated_at": now,
+        }
+
+        self._col(self._speaker_profiles_collection).update_one(
+            {"_id": oid},
+            {"$set": update_doc}
+        )
+
+        return {
+            "id": profile_id,
+            **update_doc,
+        }
+
+    def delete_speaker_profile(self, *, profile_id: str) -> bool:
+        """删除说话人配置"""
+        from bson.objectid import ObjectId
+
+        try:
+            oid = ObjectId(profile_id)
+        except Exception:
+            return False
+
+        result = self._col(self._speaker_profiles_collection).delete_one({"_id": oid})
+        return bool(result.deleted_count)
+
     def list_episode_profiles(self) -> list[dict[str, Any]]:
         """获取所有节目配置列表。
         

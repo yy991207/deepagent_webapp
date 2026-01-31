@@ -458,9 +458,48 @@ def podcast_task_status_from_mongo(task_id: str) -> dict[str, Any]:
         task_status = storage.get_task_status(task_id=task_id)
         if task_status is None:
             raise HTTPException(status_code=404, detail="task not found")
-        
+
         return task_status
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+
+
+@router.post("/api/podcast/speaker-profiles")
+def podcast_create_speaker_profile(payload: dict[str, Any]) -> dict[str, Any]:
+    """创建说话人配置"""
+    svc = build_podcast_middleware()
+    try:
+        result = svc.create_speaker_profile(data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    return result
+
+
+@router.put("/api/podcast/speaker-profiles/{profile_id}")
+def podcast_update_speaker_profile(profile_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """更新说话人配置"""
+    svc = build_podcast_middleware()
+    try:
+        result = svc.update_speaker_profile(profile_id=profile_id, data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    return result
+
+
+@router.delete("/api/podcast/speaker-profiles/{profile_id}")
+def podcast_delete_speaker_profile(profile_id: str) -> dict[str, Any]:
+    """删除说话人配置"""
+    svc = build_podcast_middleware()
+    try:
+        success = svc.delete_speaker_profile(profile_id=profile_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    if not success:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
