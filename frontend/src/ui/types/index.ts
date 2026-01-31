@@ -13,6 +13,36 @@ export type UploadedSource = {
   created_at?: string;
 };
 
+// ========== File Tree Types ==========
+
+export type SourceItemType = "file" | "folder";
+
+export type SourceItem = {
+  id: string;
+  filename: string;
+  rel_path?: string;
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
+  parent_id: string | null;
+  item_type: SourceItemType;
+  file_type?: string;
+  sort_order: number;
+};
+
+export type SourceTreeNode = SourceItem & {
+  children: SourceTreeNode[];
+  expanded?: boolean;
+};
+
+export type DragPosition = "before" | "after" | "inside";
+
+export type DragState = {
+  draggedId: string | null;
+  targetId: string | null;
+  position: DragPosition | null;
+};
+
 export type UploadedSourceDetail = UploadedSource & {
   sha256?: string;
   content_preview?: string | null;

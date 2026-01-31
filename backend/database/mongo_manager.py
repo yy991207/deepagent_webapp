@@ -90,9 +90,11 @@ class MongoDbManager:
         filename: str,
         rel_path: str,
         content_bytes: bytes,
+        parent_id: str | None = None,
     ) -> StoredDocument:
         sha256 = hashlib.sha256(content_bytes).hexdigest()
         size = len(content_bytes)
+        now = get_beijing_time()
 
         doc: dict[str, Any] = {
             "sha256": sha256,
@@ -100,7 +102,11 @@ class MongoDbManager:
             "rel_path": rel_path,
             "size": size,
             "content": Binary(content_bytes),
-            "created_at": datetime.now(timezone.utc),
+            "parent_id": parent_id,
+            "item_type": "file",
+            "sort_order": self._get_next_sort_order(parent_id),
+            "created_at": now,
+            "updated_at": now,
         }
 
         collection = self._collection()
@@ -112,6 +118,326 @@ class MongoDbManager:
             filename=filename,
             rel_path=rel_path,
             size=size,
+        )
+
+    # ========== 文件树相关方法 ==========
+
+    def create_folder(
+        self,
+        *,
+        name: str,
+        parent_id: str | None = None,
+    ) -> StoredDocument:
+        """创建文件夹"""
+        now = get_beijing_time()
+        doc: dict[str, Any] = {
+            "filename": name,
+            "rel_path": name,
+            "parent_id": parent_id,
+            "item_type": "folder",
+            "size": 0,
+            "content": None,
+            "sha256": "",
+            "sort_order": self._get_next_sort_order(parent_id),
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = self._collection().insert_one(doc)
+        return StoredDocument(
+            id=str(result.inserted_id),
+            sha256="",
+            filename=name,
+            rel_path=name,
+            size=0,
+        )
+
+    def get_tree(self) -> list[dict[str, Any]]:
+        """获取完整树形结构（不含文件内容）"""
+        projection = {"content": 0}
+        items = list(self._collection().find({}, projection).sort([("sort_order", 1), ("created_at", 1)]))
+
+        out: list[dict[str, Any]] = []
+        for item in items:
+            created = item.get("created_at")
+            created_at = created.isoformat() if hasattr(created, "isoformat") else str(created or "")
+            updated = item.get("updated_at")
+            updated_at = updated.isoformat() if hasattr(updated, "isoformat") else str(updated or "")
+
+            out.append({
+                "id": str(item.get("_id")),
+                "filename": item.get("filename", ""),
+                "rel_path": item.get("rel_path", ""),
+                "parent_id": item.get("parent_id"),
+                "item_type": item.get("item_type", "file"),
+                "size": item.get("size", 0),
+                "file_type": self._get_file_type(item.get("filename", "")),
+                "sort_order": item.get("sort_order", 0),
+                "created_at": created_at,
+                "updated_at": updated_at,
+            })
+        return out
+
+    def move_item(
+        self,
+        *,
+        item_id: str,
+        target_parent_id: str | None,
+    ) -> bool:
+        """移动文件/文件夹到目标位置"""
+        try:
+            oid = ObjectId(item_id)
+        except Exception:
+            return False
+
+        # 检查是否会造成循环引用（文件夹不能移到自己的子文件夹下）
+        if target_parent_id:
+            if self._is_descendant(item_id, target_parent_id):
+                return False
+
+        result = self._collection().update_one(
+            {"_id": oid},
+            {
+                "$set": {
+                    "parent_id": target_parent_id,
+                    "sort_order": self._get_next_sort_order(target_parent_id),
+                    "updated_at": get_beijing_time(),
+                }
+            },
+        )
+        return bool(result.modified_count)
+
+    def reorder_item(
+        self,
+        *,
+        item_id: str,
+        target_id: str,
+        position: str,  # "before" | "after" | "inside"
+    ) -> dict[str, Any] | None:
+        """重新排序/移动项目
+
+        Args:
+            item_id: 被移动的项目 ID
+            target_id: 参照项目 ID
+            position:
+                - "before": 移到 target 前面（同级）
+                - "after": 移到 target 后面（同级）
+                - "inside": 移到 target 内部（target 必须是文件夹）
+        """
+        try:
+            item_oid = ObjectId(item_id)
+            target_oid = ObjectId(target_id)
+        except Exception:
+            return None
+
+        # 获取目标项目信息
+        target = self._collection().find_one({"_id": target_oid})
+        if not target:
+            return None
+
+        # 确定新的 parent_id 和 sort_order
+        if position == "inside":
+            # 移动到文件夹内部
+            if target.get("item_type") != "folder":
+                return None  # 只能移动到文件夹内
+
+            new_parent_id = target_id
+            # 获取文件夹内最大的 sort_order，新项目排在最后
+            max_order = self._get_max_sort_order(new_parent_id)
+            new_sort_order = max_order + 1
+
+        else:
+            # 移动到同级 before/after
+            new_parent_id = target.get("parent_id")
+            target_order = target.get("sort_order", 0)
+
+            if position == "before":
+                new_sort_order = target_order
+                # 将 target 及其后面的项目 sort_order +1
+                self._shift_sort_orders(new_parent_id, target_order, 1)
+            else:  # after
+                new_sort_order = target_order + 1
+                # 将 target 后面的项目 sort_order +1
+                self._shift_sort_orders(new_parent_id, target_order + 1, 1)
+
+        # 检查循环引用
+        if new_parent_id and self._is_descendant(item_id, new_parent_id):
+            return None
+
+        # 更新项目
+        result = self._collection().update_one(
+            {"_id": item_oid},
+            {
+                "$set": {
+                    "parent_id": new_parent_id,
+                    "sort_order": new_sort_order,
+                    "updated_at": get_beijing_time(),
+                }
+            },
+        )
+
+        if not result.modified_count:
+            return None
+
+        return {
+            "item_id": item_id,
+            "parent_id": new_parent_id,
+            "sort_order": new_sort_order,
+        }
+
+    def duplicate_document(
+        self,
+        *,
+        doc_id: str,
+        target_parent_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """复制文档到指定位置"""
+        try:
+            oid = ObjectId(doc_id)
+        except Exception:
+            return None
+
+        item = self._collection().find_one({"_id": oid})
+        if not item:
+            return None
+
+        # 如果是文件夹，需要递归复制子项目
+        if item.get("item_type") == "folder":
+            return self._duplicate_folder(item, target_parent_id)
+
+        # 复制文件
+        now = get_beijing_time()
+        new_doc = {
+            "sha256": item.get("sha256", ""),
+            "filename": f"{item.get('filename', 'copy')} (副本)",
+            "rel_path": item.get("rel_path", ""),
+            "size": item.get("size", 0),
+            "content": item.get("content"),
+            "parent_id": target_parent_id if target_parent_id is not None else item.get("parent_id"),
+            "item_type": "file",
+            "sort_order": self._get_next_sort_order(target_parent_id if target_parent_id is not None else item.get("parent_id")),
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        result = self._collection().insert_one(new_doc)
+        return {
+            "id": str(result.inserted_id),
+            "filename": new_doc["filename"],
+            "parent_id": new_doc["parent_id"],
+            "item_type": "file",
+        }
+
+    def _duplicate_folder(
+        self,
+        folder: dict[str, Any],
+        target_parent_id: str | None,
+    ) -> dict[str, Any] | None:
+        """递归复制文件夹"""
+        now = get_beijing_time()
+        parent_id = target_parent_id if target_parent_id is not None else folder.get("parent_id")
+
+        new_folder_doc = {
+            "filename": f"{folder.get('filename', 'folder')} (副本)",
+            "rel_path": folder.get("rel_path", ""),
+            "parent_id": parent_id,
+            "item_type": "folder",
+            "size": 0,
+            "content": None,
+            "sha256": "",
+            "sort_order": self._get_next_sort_order(parent_id),
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        result = self._collection().insert_one(new_folder_doc)
+        new_folder_id = str(result.inserted_id)
+
+        # 递归复制子项目
+        old_folder_id = str(folder.get("_id"))
+        children = list(self._collection().find({"parent_id": old_folder_id}))
+        for child in children:
+            if child.get("item_type") == "folder":
+                self._duplicate_folder(child, new_folder_id)
+            else:
+                self.duplicate_document(doc_id=str(child.get("_id")), target_parent_id=new_folder_id)
+
+        return {
+            "id": new_folder_id,
+            "filename": new_folder_doc["filename"],
+            "parent_id": parent_id,
+            "item_type": "folder",
+        }
+
+    def delete_folder_recursive(self, *, folder_id: str) -> int:
+        """递归删除文件夹及其所有子项目"""
+        try:
+            oid = ObjectId(folder_id)
+        except Exception:
+            return 0
+
+        deleted_count = 0
+
+        # 先删除所有子项目
+        children = list(self._collection().find({"parent_id": folder_id}))
+        for child in children:
+            child_id = str(child.get("_id"))
+            if child.get("item_type") == "folder":
+                deleted_count += self.delete_folder_recursive(folder_id=child_id)
+            else:
+                result = self._collection().delete_one({"_id": ObjectId(child_id)})
+                deleted_count += result.deleted_count
+
+        # 删除文件夹本身
+        result = self._collection().delete_one({"_id": oid})
+        deleted_count += result.deleted_count
+
+        return deleted_count
+
+    def _get_file_type(self, filename: str) -> str:
+        """从文件名提取文件类型"""
+        if not filename or "." not in filename:
+            return "unknown"
+        return filename.rsplit(".", 1)[-1].lower()
+
+    def _is_descendant(self, ancestor_id: str, descendant_id: str) -> bool:
+        """检查 descendant_id 是否是 ancestor_id 的子孙节点"""
+        current = descendant_id
+        visited: set[str] = set()
+        while current:
+            if current in visited:
+                break
+            visited.add(current)
+            if current == ancestor_id:
+                return True
+            try:
+                doc = self._collection().find_one({"_id": ObjectId(current)}, {"parent_id": 1})
+                current = doc.get("parent_id") if doc else None
+            except Exception:
+                break
+        return False
+
+    def _get_next_sort_order(self, parent_id: str | None) -> int:
+        """获取指定父级下的下一个 sort_order"""
+        return self._get_max_sort_order(parent_id) + 1
+
+    def _get_max_sort_order(self, parent_id: str | None) -> int:
+        """获取指定父级下的最大 sort_order"""
+        query: dict[str, Any] = {"parent_id": parent_id}
+        doc = self._collection().find_one(
+            query,
+            sort=[("sort_order", -1)],
+            projection={"sort_order": 1},
+        )
+        return doc.get("sort_order", 0) if doc else 0
+
+    def _shift_sort_orders(self, parent_id: str | None, from_order: int, delta: int) -> None:
+        """批量调整 sort_order"""
+        self._collection().update_many(
+            {
+                "parent_id": parent_id,
+                "sort_order": {"$gte": from_order},
+            },
+            {"$inc": {"sort_order": delta}},
         )
 
     def list_documents(

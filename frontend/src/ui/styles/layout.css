@@ -118,49 +118,60 @@
 
 .corner-actions {
   margin-top: auto;
-  padding-top: 10px;
+  padding: 12px 16px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.corner-actions .create-note-btn {
-  width: 100%;
-  justify-content: center;
-  font-size: 12px;
-  padding: 6px 12px;
-  gap: 6px;
-}
-
-.corner-actions .create-note-btn svg {
-  width: 14px;
-  height: 14px;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .corner-actions .header-actions {
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .corner-actions .icon-btn-header {
-  padding: 4px;
-  border-radius: 40%;
+  padding: 6px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.15s ease;
+}
+
+.corner-actions .icon-btn-header:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #374151;
 }
 
 .corner-actions .icon-btn-header svg {
-  width: 14px;
-  height: 14px;
-}
-
-.corner-actions .header-actions span {
-  font-size: 12px;
+  width: 18px;
+  height: 18px;
 }
 
 .corner-actions .user-avatar {
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.corner-actions .user-avatar:hover {
+  transform: scale(1.05);
 }
 
 .left-collapsed .corner-actions {

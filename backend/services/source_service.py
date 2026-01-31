@@ -17,8 +17,22 @@ class SourceService:
     def __init__(self, mongo: MongoDbManager | None = None) -> None:
         self._mongo = mongo or get_mongo_manager()
 
-    async def upload_sources(self, files: list[UploadFile]) -> dict[str, Any]:
-        # 关键逻辑：这里只做“清洗文件名 + 读文件内容 + 入库”，路由层只负责参数接收
+    async def upload_sources(
+        self,
+        files: list[UploadFile],
+        *,
+        parent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """上传文件到指定位置
+        
+        Args:
+            files: 要上传的文件列表
+            parent_id: 可选的父文件夹 ID，None 表示根目录
+        
+        Returns:
+            包含上传结果的字典
+        """
+        # 关键逻辑：这里只做"清洗文件名 + 读文件内容 + 入库"，路由层只负责参数接收
         saved: list[dict[str, Any]] = []
 
         for f in files:
@@ -35,6 +49,7 @@ class SourceService:
                 filename=Path(rel_path).name,
                 rel_path=rel_path,
                 content_bytes=content,
+                parent_id=parent_id,
             )
 
             saved.append(
@@ -44,6 +59,8 @@ class SourceService:
                     "rel_path": stored.rel_path,
                     "filename": stored.filename,
                     "size": stored.size,
+                    "parent_id": parent_id,
+                    "item_type": "file",
                 }
             )
 

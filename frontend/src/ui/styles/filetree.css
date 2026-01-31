@@ -24,9 +24,11 @@
 .sidebar-rail {
   flex: 1;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   padding-top: 12px;
+  gap: 8px;
 }
 
 .sidebar-rail-right {
@@ -878,5 +880,38 @@
   justify-content: flex-end;
   gap: 12px;
   padding-top: 8px;
+}
+
+/* Source Actions Row - for FileTree integration */
+.source-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.source-actions-row .add-source-btn {
+  flex: 1;
+}
+
+.add-folder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.add-folder-btn:hover {
+  background: #f8f9fa;
+  border-color: #d0d0d0;
+  color: var(--text-primary);
 }
 

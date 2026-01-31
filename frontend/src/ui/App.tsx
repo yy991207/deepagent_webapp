@@ -18,6 +18,7 @@ import type {
   FilesystemWrite,
   PodcastEpisodeProfile,
   VoiceOption,
+  SourceItem,
 } from "./types";
 
 import {
@@ -38,6 +39,8 @@ import {
 } from "./types";
 
 import { useChat } from "./hooks/useChat";
+import { useFileTree } from "./hooks/useFileTree";
+import { FileTree } from "./components/FileTree";
 
 
 function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: number; title: string }) {
@@ -464,6 +467,12 @@ function App() {
   const [renameSourceTarget, setRenameSourceTarget] = useState<UploadedSource | null>(null);
   const [renameSourceDraft, setRenameSourceDraft] = useState<string>("");
   const [deleteSourceId, setDeleteSourceId] = useState<string | null>(null);
+  
+  // FileTree hook for hierarchical source management
+  const [fileTreeState, fileTreeActions] = useFileTree();
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
   
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [logs, setLogs] = useState<AgentLog[]>([]);
@@ -1288,6 +1297,8 @@ function App() {
       setRenameSourceDraft("");
     }
 
+    // 刷新文件树和数据源列表
+    await fileTreeActions.fetchTree();
     await fetchSources();
 
     if (sourceDetailOpen && sourceDetail?.id === target.id) {
@@ -1325,6 +1336,8 @@ function App() {
       setSourceDetail(null);
     }
 
+    // 刷新文件树和数据源列表
+    await fileTreeActions.fetchTree();
     await fetchSources();
   };
 
@@ -1871,13 +1884,26 @@ function App() {
               >
                 <Icons.PanelExpandLeft />
               </button>
+              <button
+                class="sidebar-collapse-icon-btn"
+                onClick={() => {
+                  setIsLeftCollapsed(false);
+                  setLeftPanelMode("sources");
+                }}
+                aria-label="数据来源"
+                type="button"
+                title="数据来源"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                </svg>
+              </button>
             </div>
           ) : (
             <div class="sidebar-card">
               <div class="sidebar-header">
                 <h2>{leftPanelMode === "sources" ? "数据来源" : "聊天历史"}</h2>
                 <div class="sidebar-header-actions">
-                  <div class="icon-btn"><Icons.Settings /></div>
                   <button
                     class="sidebar-collapse-icon-btn"
                     onClick={() => setIsLeftCollapsed(true)}
@@ -1997,81 +2023,90 @@ function App() {
                 </>
               ) : (
                 <>
-              <button
-                class="add-source-btn"
-                type="button"
-                onClick={() => {
-                  setPendingUploadFiles([]);
-                  setUploadState({ status: "idle" });
-                  setAddSourceOpen(true);
-                }}
-              >
-                <Icons.Plus />
-                添加来源
-              </button>
-
-              <div class="source-list-header">
-                <span>选择所有来源</span>
-                <div class="checkbox-wrapper">
-                  <input
-                    type="checkbox"
-                    checked={allFilePaths.length > 0 && selectedFiles.size === allFilePaths.length}
-                    onChange={(e) => setAllSelected((e.target as HTMLInputElement).checked)}
-                  />
-                </div>
+              <div class="source-actions-row">
+                <button
+                  class="add-source-btn"
+                  type="button"
+                  onClick={() => {
+                    setPendingUploadFiles([]);
+                    setUploadState({ status: "idle" });
+                    setAddSourceOpen(true);
+                  }}
+                >
+                  <Icons.Plus />
+                  添加来源
+                </button>
+                <button
+                  class="add-folder-btn"
+                  type="button"
+                  onClick={() => {
+                    setNewFolderName("");
+                    setNewFolderParentId(null);
+                    setCreateFolderOpen(true);
+                  }}
+                  title="创建文件夹"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31z" />
+                  </svg>
+                </button>
               </div>
 
               <div class="source-list">
-                {sources.length ? (
-                  <div class="file-list">
-                    {sources.map((s) => (
-                      <div key={s.id} class="file-item" onClick={() => openSourceDetail(s)}>
-                        <div class="source-more-wrap" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            class="source-more-btn"
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSourceActionMenuId((prev) => (prev === s.id ? null : s.id));
-                            }}
-                            aria-label="来源操作"
-                          >
-                            <Icons.MoreVert />
-                          </button>
-                          {sourceActionMenuId === s.id && (
-                            <div class="source-more-menu" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                class="source-more-item"
-                                type="button"
-                                onClick={() => requestRenameSource(s)}
-                              >
-                                重命名
-                              </button>
-                              <button
-                                class="source-more-item danger"
-                                type="button"
-                                onClick={() => requestDeleteSource(s)}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <div class="file-icon"><Icons.Pdf /></div>
-                        <div class="file-name" title={s.rel_path || s.filename}>{s.filename}</div>
-                        <div class="checkbox-wrapper" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedFiles.has(s.id)}
-                            onChange={() => toggleSelected(s.id)}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ padding: 12, color: "var(--text-muted)", fontSize: 13 }}>暂无已上传文档</div>
-                )}
+                <FileTree
+                  items={fileTreeState.items}
+                  expandedIds={fileTreeState.expandedIds}
+                  selectedId={fileTreeState.selectedId}
+                  checkedIds={selectedFiles}
+                  dragState={fileTreeState.dragState}
+                  onSelect={(item) => {
+                    if (item.item_type === "file") {
+                      openSourceDetail({ id: item.id, filename: item.filename, rel_path: item.rel_path, size: item.size, created_at: item.created_at });
+                    }
+                    fileTreeActions.selectItem(item);
+                  }}
+                  onToggleExpand={fileTreeActions.toggleExpand}
+                  onToggleCheck={toggleSelected}
+                  onDragStart={fileTreeActions.handleDragStart}
+                  onDragOver={fileTreeActions.handleDragOver}
+                  onDragEnd={fileTreeActions.handleDragEnd}
+                  onDrop={fileTreeActions.handleDrop}
+                  onMenuAction={async (action, item) => {
+                    switch (action) {
+                      case "rename":
+                        setRenameSourceTarget({ id: item.id, filename: item.filename });
+                        setRenameSourceDraft(item.filename);
+                        setRenameSourceOpen(true);
+                        break;
+                      case "delete":
+                        if (item.item_type === "folder") {
+                          if (confirm(`确定要删除文件夹 "${item.filename}" 及其所有内容吗？`)) {
+                            await fileTreeActions.deleteItem(item.id, true);
+                          }
+                        } else {
+                          setDeleteSourceId(item.id);
+                        }
+                        break;
+                      case "duplicate":
+                        await fileTreeActions.duplicateItem(item.id);
+                        break;
+                      case "import":
+                        setPendingUploadFiles([]);
+                        setUploadState({ status: "idle" });
+                        setNewFolderParentId(item.id);
+                        setAddSourceOpen(true);
+                        break;
+                      case "new-folder":
+                        setNewFolderName("");
+                        setNewFolderParentId(item.id);
+                        setCreateFolderOpen(true);
+                        break;
+                      case "move":
+                        // TODO: implement folder selection modal
+                        break;
+                    }
+                  }}
+                />
               </div>
               </>
               )}
@@ -2098,18 +2133,9 @@ function App() {
               )}
 
               <div class="corner-actions">
-                <button class="create-note-btn">
-                  <Icons.Plus />
-                  创建笔记本
-                </button>
                 <div class="header-actions">
-                  <button class="icon-btn-header">
-                    <Icons.Share />
-                    <span style={{ marginLeft: 4, fontSize: 14, fontWeight: 500 }}>分享</span>
-                  </button>
-                  <button class="icon-btn-header"><Icons.Settings /></button>
-                  <button class="icon-btn-header"><Icons.Apps /></button>
-                  <div class="user-avatar">Y</div>
+                  <button class="icon-btn-header" title="设置"><Icons.Settings /></button>
+                  <div class="user-avatar" title="用户">Y</div>
                 </div>
               </div>
             </div>
@@ -2120,7 +2146,6 @@ function App() {
         <main class="main-content">
           <header class="chat-header">
             <div class="chat-title">对话</div>
-            <div class="icon-btn"><Icons.MoreVert /></div>
           </header>
 
           <div class="chat-messages">
@@ -2465,7 +2490,6 @@ function App() {
               <div class="sidebar-header">
                 <h2>Studio</h2>
                 <div class="sidebar-header-actions">
-                  <div class="icon-btn"><Icons.MoreVert /></div>
                   <button
                     class="sidebar-collapse-icon-btn"
                     onClick={() => setIsRightCollapsed(true)}
@@ -3477,6 +3501,44 @@ function App() {
               </button>
               <button class="source-action-btn danger" type="button" onClick={() => void confirmDeleteSource()}>
                 删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createFolderOpen && (
+        <div class="add-source-backdrop" onClick={() => setCreateFolderOpen(false)}>
+          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="source-action-title">创建文件夹</div>
+            <input
+              class="source-action-input"
+              value={newFolderName}
+              onInput={(e) => setNewFolderName((e.target as HTMLInputElement).value)}
+              placeholder="请输入文件夹名称"
+              autoFocus
+            />
+            <div class="source-action-actions">
+              <button class="source-action-btn" type="button" onClick={() => setCreateFolderOpen(false)}>
+                取消
+              </button>
+              <button
+                class="source-action-btn primary"
+                type="button"
+                onClick={async () => {
+                  const name = newFolderName.trim();
+                  if (!name) return;
+                  try {
+                    await fileTreeActions.createFolder(name, newFolderParentId);
+                    setCreateFolderOpen(false);
+                    setNewFolderName("");
+                    setNewFolderParentId(null);
+                  } catch {
+                    // Error handled in hook
+                  }
+                }}
+              >
+                创建
               </button>
             </div>
           </div>
