@@ -106,7 +106,26 @@ const upsertToolMessage = (
   if (existingIndex >= 0) {
     return prev.map((m, i) => (i === existingIndex ? merged : m));
   }
-  return [...prev, merged];
+  
+  // 新的 tool 消息应该插入到最后一个 assistant 消息之前
+  // 这样可以保持 tool 调用在 assistant 回复之前的正确顺序
+  // 从后往前找，找到最后一个 assistant 消息的位置
+  let insertIndex = prev.length;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].role === "assistant") {
+      insertIndex = i;
+      break;
+    }
+    // 如果遇到 user 消息，说明还没有 assistant 回复，直接添加到末尾
+    if (prev[i].role === "user") {
+      break;
+    }
+  }
+  
+  // 插入到指定位置
+  const result = [...prev];
+  result.splice(insertIndex, 0, merged);
+  return result;
 };
 
 // --- Icons ---
