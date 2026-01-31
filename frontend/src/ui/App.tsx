@@ -190,6 +190,7 @@ const Icons = {
   Pdf: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>,
   User: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>,
   Mic: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>,
+  Close: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>,
 };
 
 const AGENTS = [
@@ -489,6 +490,9 @@ function App() {
   const [editingEpisodeProfile, setEditingEpisodeProfile] = useState<PodcastEpisodeProfile | null>(null);
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [podcastSelectedEpisode, setPodcastSelectedEpisode] = useState<string>("");
+  const [podcastSourceSelectOpen, setPodcastSourceSelectOpen] = useState(false);
+  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
+  const [deletingProfileType, setDeletingProfileType] = useState<"speaker" | "episode" | null>(null);
 
   const [memoryStats, setMemoryStats] = useState<{ chars: number; limit: number; ratio: number }>({
     chars: 0,
@@ -2694,26 +2698,23 @@ function App() {
             <div class="add-source-top">
               <div class="add-source-title">
                 播客配置
-                <div class="add-source-subtitle">生成播客</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div class="podcast-config-top-actions">
                 <button
-                  class="podcast-settings-btn"
+                  class="podcast-config-icon-btn"
                   type="button"
                   title="配置管理"
                   onClick={() => setPodcastSettingsOpen(true)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: "4px",
-                    borderRadius: "4px",
-                  }}
                 >
                   <Icons.Settings />
                 </button>
-                <button class="add-source-close" type="button" onClick={() => setPodcastConfigOpen(false)}>
-                  ×
+                <button
+                  class="podcast-config-icon-btn"
+                  type="button"
+                  title="关闭"
+                  onClick={() => setPodcastConfigOpen(false)}
+                >
+                  <Icons.Close />
                 </button>
               </div>
             </div>
@@ -2767,54 +2768,16 @@ function App() {
                 />
               </div>
 
-              <div class="podcast-config-row" style={{ flex: 1, minHeight: 0 }}>
+              <div class="podcast-config-row">
                 <div class="ref-section-title">数据源</div>
-                <div class="podcast-source-container">
-                  <label class="podcast-source-all">
-                    <input
-                      type="checkbox"
-                      checked={podcastSources.length > 0 && podcastSelectedSourceIds.size === podcastSources.length}
-                      onChange={(e) => setAllPodcastSources((e.target as HTMLInputElement).checked)}
-                    />
-                    <span class="podcast-source-all-text">选择所有来源</span>
-                    <span class="podcast-source-all-meta">
-                      已选 {podcastSelectedSourceIds.size}/{podcastSources.length}
-                    </span>
-                  </label>
-
-                  <div class="podcast-source-list">
-                    {podcastSourcesLoading ? (
-                      <div class="ref-muted" style={{ padding: "8px 2px" }}>加载中...</div>
-                    ) : (
-                      <div class="podcast-source-items">
-                        {podcastSources.map((s) => {
-                          const checked = podcastSelectedSourceIds.has(s.id);
-                          return (
-                            <div
-                              key={s.id}
-                              class={`podcast-source-row ${checked ? "selected" : ""}`}
-                              onClick={() => togglePodcastSource(s.id)}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <div class="podcast-source-left">
-                                <div class="podcast-source-icon"><Icons.Pdf /></div>
-                                <div class="podcast-source-name" title={s.filename}>{s.filename}</div>
-                              </div>
-                              <div class="podcast-source-right" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => togglePodcastSource(s.id)}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <button
+                  class="podcast-source-select-btn"
+                  type="button"
+                  onClick={() => setPodcastSourceSelectOpen(true)}
+                >
+                  <span>选择数据源</span>
+                  <span class="podcast-source-count">已选 {podcastSelectedSourceIds.size}/{podcastSources.length}</span>
+                </button>
               </div>
 
               <div class="podcast-config-actions">
@@ -2832,6 +2795,73 @@ function App() {
                   生成播客
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {podcastSourceSelectOpen && (
+        <div class="add-source-backdrop" onClick={() => setPodcastSourceSelectOpen(false)}>
+          <div class="podcast-source-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="add-source-top">
+              <div class="add-source-title">
+                选择数据源
+                <div class="add-source-subtitle">选择用于生成播客的素材</div>
+              </div>
+              <button class="add-source-close" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div class="podcast-source-modal-body">
+              <label class="podcast-source-all">
+                <input
+                  type="checkbox"
+                  checked={podcastSources.length > 0 && podcastSelectedSourceIds.size === podcastSources.length}
+                  onChange={(e) => setAllPodcastSources((e.target as HTMLInputElement).checked)}
+                />
+                <span class="podcast-source-all-text">选择所有来源</span>
+                <span class="podcast-source-all-meta">
+                  已选 {podcastSelectedSourceIds.size}/{podcastSources.length}
+                </span>
+              </label>
+
+              <div class="podcast-source-list">
+                {podcastSourcesLoading ? (
+                  <div class="ref-muted" style={{ padding: "8px 2px" }}>加载中...</div>
+                ) : (
+                  <div class="podcast-source-items">
+                    {podcastSources.map((s) => {
+                      const checked = podcastSelectedSourceIds.has(s.id);
+                      return (
+                        <div
+                          key={s.id}
+                          class={`podcast-source-row ${checked ? "selected" : ""}`}
+                          onClick={() => togglePodcastSource(s.id)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <div class="podcast-source-left">
+                            <div class="podcast-source-icon"><Icons.Pdf /></div>
+                            <div class="podcast-source-name" title={s.filename}>{s.filename}</div>
+                          </div>
+                          <div class="podcast-source-right" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePodcastSource(s.id)}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div class="podcast-source-modal-actions">
+              <button class="add-source-action primary" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
+                确定
+              </button>
             </div>
           </div>
         </div>
@@ -2936,7 +2966,6 @@ function App() {
             <div class="add-source-top">
               <div class="add-source-title">
                 配置管理
-                <div class="add-source-subtitle">说话人配置 / 节目配置</div>
               </div>
               <button class="add-source-close" type="button" onClick={() => {
                 setPodcastSettingsOpen(false);
@@ -2977,7 +3006,7 @@ function App() {
               {podcastSettingsTab === "speaker" && !editingSpeakerProfile && (
                 <div class="podcast-profile-list">
                   {podcastSpeakerProfiles.map((p) => (
-                    <div key={p.id} class="podcast-profile-item">
+                    <div key={p.id} class={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
                       <div class="podcast-profile-info">
                         <div class="podcast-profile-name">{p.name}</div>
                         <div class="podcast-profile-meta">
@@ -2986,19 +3015,24 @@ function App() {
                       </div>
                       <div class="podcast-profile-actions">
                         <button
-                          class="podcast-profile-btn edit"
+                          class="podcast-profile-icon-btn"
+                          title="编辑"
                           onClick={() => {
                             setEditingSpeakerProfile(p);
                             setIsCreatingProfile(false);
                           }}
                         >
-                          编辑
+                          <Icons.Settings />
                         </button>
                         <button
-                          class="podcast-profile-btn delete"
-                          onClick={() => deleteSpeakerProfile(p.id)}
+                          class="podcast-profile-icon-btn"
+                          title="删除"
+                          onClick={() => {
+                            setDeletingProfileId(p.id);
+                            setDeletingProfileType("speaker");
+                          }}
                         >
-                          删除
+                          <Icons.Close />
                         </button>
                       </div>
                     </div>
@@ -3043,7 +3077,7 @@ function App() {
               {podcastSettingsTab === "episode" && !editingEpisodeProfile && (
                 <div class="podcast-profile-list">
                   {podcastEpisodeProfiles.map((p) => (
-                    <div key={p.id} class="podcast-profile-item">
+                    <div key={p.id} class={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
                       <div class="podcast-profile-info">
                         <div class="podcast-profile-name">{p.name}</div>
                         <div class="podcast-profile-meta">
@@ -3052,19 +3086,24 @@ function App() {
                       </div>
                       <div class="podcast-profile-actions">
                         <button
-                          class="podcast-profile-btn edit"
+                          class="podcast-profile-icon-btn"
+                          title="编辑"
                           onClick={() => {
                             setEditingEpisodeProfile(p);
                             setIsCreatingProfile(false);
                           }}
                         >
-                          编辑
+                          <Icons.Settings />
                         </button>
                         <button
-                          class="podcast-profile-btn delete"
-                          onClick={() => deleteEpisodeProfile(p.id)}
+                          class="podcast-profile-icon-btn"
+                          title="删除"
+                          onClick={() => {
+                            setDeletingProfileId(p.id);
+                            setDeletingProfileType("episode");
+                          }}
                         >
-                          删除
+                          <Icons.Close />
                         </button>
                       </div>
                     </div>
@@ -3110,6 +3149,37 @@ function App() {
                   }}
                 />
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingProfileId && (
+        <div class="add-source-backdrop" onClick={() => {
+          setDeletingProfileId(null);
+          setDeletingProfileType(null);
+        }}>
+          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="source-action-title">删除配置</div>
+            <div class="source-action-desc">确认删除该配置吗？删除后不可恢复。</div>
+            <div class="source-action-actions">
+              <button class="source-action-btn" type="button" onClick={() => {
+                setDeletingProfileId(null);
+                setDeletingProfileType(null);
+              }}>
+                取消
+              </button>
+              <button class="source-action-btn danger" type="button" onClick={async () => {
+                if (deletingProfileType === "speaker") {
+                  await deleteSpeakerProfile(deletingProfileId);
+                } else if (deletingProfileType === "episode") {
+                  await deleteEpisodeProfile(deletingProfileId);
+                }
+                setDeletingProfileId(null);
+                setDeletingProfileType(null);
+              }}>
+                删除
+              </button>
             </div>
           </div>
         </div>
