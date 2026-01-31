@@ -32,7 +32,7 @@
 }
 
 .sidebar-rail-right {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .sidebar-collapse-icon-btn {
