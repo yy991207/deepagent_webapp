@@ -677,10 +677,67 @@ class PodcastMiddleware:
                             return {"audio_file": str(out)}
                         return {"audio_file": None}
 
+                class _Qwen3TTSWrapper:
+                    """Qwen3-TTS/CosyVoice wrapper，兼容 esperanto AIFactory 接口"""
+                    def __init__(self, model_name: str | None = None, **kwargs: Any) -> None:
+                        self.model_name = model_name or "cosyvoice-v2"
+
+                    async def agenerate_speech(
+                        self,
+                        *,
+                        text: str,
+                        voice: str | None = None,
+                        output_file: str | Path | None = None,
+                        **kwargs: Any,
+                    ) -> dict[str, Any]:
+                        import dashscope
+                        from dashscope.audio.tts_v2 import SpeechSynthesizer
+
+                        # 配置 API Key
+                        dashscope.api_key = os.environ.get("DASHSCOPE_API_KEY") or ""
+
+                        v = (voice or "").strip()
+
+                        default_voice = (
+                            os.environ.get("PODCAST_QWEN3_TTS_VOICE_DEFAULT")
+                            or "longxiaochun_v2"
+                        ).strip()
+                        alt_voice = (
+                            os.environ.get("PODCAST_QWEN3_TTS_VOICE_ALT")
+                            or "longlaotie_v2"
+                        ).strip()
+
+                        # 音色选择逻辑：空则用默认，否则根据 voice 字符串哈希选择
+                        if not v:
+                            v = default_voice
+                        elif v not in {default_voice, alt_voice}:
+                            seed = zlib.crc32(v.encode("utf-8"))
+                            v = alt_voice if (seed % 2 == 1) else default_voice
+
+                        if output_file is not None:
+                            out = Path(output_file)
+                            out.parent.mkdir(parents=True, exist_ok=True)
+
+                            # 同步调用 Qwen3-TTS
+                            synthesizer = SpeechSynthesizer(
+                                model=self.model_name,
+                                voice=v,
+                            )
+                            audio_data = synthesizer.call(text)
+
+                            # 保存音频文件
+                            with open(str(out), "wb") as f:
+                                f.write(audio_data)
+
+                            return {"audio_file": str(out)}
+                        return {"audio_file": None}
+
                 def _create_tts_patched(provider: str, model_name: str, **kwargs: Any):
                     p = (provider or "").strip().lower()
                     if p in {"edge", "edgetts", "edge-tts"}:
                         return _EdgeTTSWrapper(model_name=model_name, **kwargs)
+                    if p in {"dashscope", "qwen3-tts", "qwen-tts", "aliyun"}:
+                        return _Qwen3TTSWrapper(model_name=model_name, **kwargs)
                     return _orig_create_tts(provider, model_name, **kwargs)
 
                 AIFactory.create_text_to_speech = staticmethod(_create_tts_patched)  # type: ignore[assignment]

@@ -143,10 +143,20 @@
  - `PODCAST_LLM_MODEL`：LLM 模型名
  - `PODCAST_OUTLINE_PROVIDER`/`PODCAST_OUTLINE_MODEL`：大纲生成配置
  - `PODCAST_TRANSCRIPT_PROVIDER`/`PODCAST_TRANSCRIPT_MODEL`：对话生成配置
- - `PODCAST_TTS_PROVIDER`：TTS 提供商（`edge`/`openai-compatible`）
- - `PODCAST_TTS_MODEL`：TTS 模型
+ - `PODCAST_TTS_PROVIDER`：TTS 提供商（`edge`/`dashscope`/`qwen3-tts`）
+ - `PODCAST_TTS_MODEL`：TTS 模型（dashscope 时为 `qwen3-tts-flash-realtime`）
  - `OPENAI_COMPATIBLE_BASE_URL`：OpenAI 兼容接口地址（播客 LLM 使用）
  - `OPENAI_COMPATIBLE_API_KEY`：OpenAI 兼容接口密钥
+
+#### Edge TTS 音色配置（PODCAST_TTS_PROVIDER=edge 时）
+- `PODCAST_EDGE_TTS_VOICE_DEFAULT`：默认音色（默认 `zh-CN-XiaoxiaoNeural`）
+- `PODCAST_EDGE_TTS_VOICE_ALT`：备选音色（默认 `zh-CN-YunyangNeural`）
+
+#### Qwen3-TTS 音色配置（PODCAST_TTS_PROVIDER=dashscope 时）
+- `PODCAST_QWEN3_TTS_VOICE_DEFAULT`：默认音色（默认 `Cherry`，女声）
+- `PODCAST_QWEN3_TTS_VOICE_ALT`：备选音色（默认 `Ethan`，男声）
+- 需要配置 `DASHSCOPE_API_KEY`（可复用 RAG embedding 的配置）
+- 更多音色参考：[Qwen3-TTS 文档](https://help.aliyun.com/zh/model-studio/qwen-tts)
 
 ### MCP（可选）
 - `DEEPAGENTS_MCP_ENABLED`：是否启用 MCP（默认启用，设为 `0/false/no/off` 禁用）
