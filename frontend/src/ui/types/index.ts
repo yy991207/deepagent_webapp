@@ -145,3 +145,51 @@ export type PodcastTranscriptEntry = {
   speaker?: string;
   dialogue?: string;
 };
+
+export type PodcastEpisodeProfile = {
+  id: string;
+  name: string;
+  description: string;
+  speaker_config: string;
+  outline_provider: string;
+  outline_model: string;
+  transcript_provider: string;
+  transcript_model: string;
+  default_briefing: string;
+  num_segments: number;
+};
+
+export type VoiceOption = {
+  id: string;
+  name: string;
+  gender: string;
+};
+
+export const EDGE_TTS_VOICES: VoiceOption[] = [
+  { id: "zh-CN-XiaoxiaoNeural", name: "晓晓", gender: "女" },
+  { id: "zh-CN-XiaoyiNeural", name: "晓伊", gender: "女" },
+  { id: "zh-CN-YunjianNeural", name: "云健", gender: "男" },
+  { id: "zh-CN-YunxiNeural", name: "云希", gender: "男" },
+  { id: "zh-CN-YunxiaNeural", name: "云夏", gender: "男" },
+  { id: "zh-CN-YunyangNeural", name: "云扬", gender: "男" },
+  { id: "zh-CN-liaoning-XiaobeiNeural", name: "晓北(辽宁)", gender: "女" },
+  { id: "zh-CN-shaanxi-XiaoniNeural", name: "晓妮(陕西)", gender: "女" },
+];
+
+export const COSYVOICE_VOICES: VoiceOption[] = [
+  { id: "longxiaochun_v2", name: "龙小淳", gender: "女" },
+  { id: "longxiaoxia_v2", name: "龙小夏", gender: "女" },
+  { id: "longlaotie_v2", name: "龙老铁", gender: "男" },
+  { id: "longanyang_v2", name: "龙安阳", gender: "男" },
+];
+
+export const TTS_PROVIDERS = [
+  { id: "edge", name: "Edge TTS (免费)" },
+  { id: "dashscope", name: "CosyVoice v2 (阿里云)" },
+];
+
+export const LLM_MODELS = [
+  { id: "qwen-plus", name: "Qwen Plus (推荐)" },
+  { id: "qwen-turbo", name: "Qwen Turbo (快速)" },
+  { id: "qwen-max", name: "Qwen Max (高质量)" },
+];
