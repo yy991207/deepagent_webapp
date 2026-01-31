@@ -721,7 +721,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  overflow: hidden;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .podcast-config-row {

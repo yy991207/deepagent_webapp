@@ -16,6 +16,8 @@ import type {
   SocketPayload,
   ChatSession,
   FilesystemWrite,
+  PodcastEpisodeProfile,
+  VoiceOption,
 } from "./types";
 
 import {
@@ -27,6 +29,13 @@ import {
   createId,
   getOrCreateSessionId,
 } from "./types/utils";
+
+import {
+  EDGE_TTS_VOICES,
+  COSYVOICE_VOICES,
+  TTS_PROVIDERS,
+  LLM_MODELS,
+} from "./types";
 
 import { useChat } from "./hooks/useChat";
 
@@ -190,6 +199,231 @@ const AGENTS = [
   { id: "quiz", name: "测验", Icon: Icons.Quiz, color: "#e0f2f1" },
 ];
 
+function SpeakerProfileEditor({
+  profile,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  profile: PodcastSpeakerProfile;
+  onChange: (p: PodcastSpeakerProfile) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const voices = profile.tts_provider === "edge" ? EDGE_TTS_VOICES : COSYVOICE_VOICES;
+
+  const updateSpeaker = (index: number, field: string, value: string) => {
+    const newSpeakers = [...(profile.speakers || [])];
+    newSpeakers[index] = { ...newSpeakers[index], [field]: value };
+    onChange({ ...profile, speakers: newSpeakers });
+  };
+
+  const addSpeaker = () => {
+    if ((profile.speakers?.length || 0) >= 4) return;
+    onChange({
+      ...profile,
+      speakers: [
+        ...(profile.speakers || []),
+        { name: `说话人${(profile.speakers?.length || 0) + 1}`, voice_id: voices[0]?.id || "", backstory: "", personality: "" },
+      ],
+    });
+  };
+
+  const removeSpeaker = (index: number) => {
+    if ((profile.speakers?.length || 0) <= 1) return;
+    onChange({
+      ...profile,
+      speakers: (profile.speakers || []).filter((_, i) => i !== index),
+    });
+  };
+
+  return (
+    <div class="podcast-edit-form">
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">配置名称 *</label>
+        <input
+          class="podcast-form-input"
+          value={profile.name}
+          onInput={(e) => onChange({ ...profile, name: (e.target as HTMLInputElement).value })}
+          placeholder="例如：双人对话"
+        />
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">TTS 提供商</label>
+        <select
+          class="podcast-form-select"
+          value={profile.tts_provider}
+          onChange={(e) => {
+            const newProvider = e.currentTarget.value;
+            const newVoices = newProvider === "edge" ? EDGE_TTS_VOICES : COSYVOICE_VOICES;
+            onChange({
+              ...profile,
+              tts_provider: newProvider,
+              tts_model: newProvider === "edge" ? "" : "cosyvoice-v2",
+              speakers: (profile.speakers || []).map((s) => ({ ...s, voice_id: newVoices[0]?.id || "" })),
+            });
+          }}
+        >
+          {TTS_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">说话人列表 ({profile.speakers?.length || 0}/4)</label>
+        <div class="podcast-speakers-list">
+          {(profile.speakers || []).map((speaker, idx) => (
+            <div key={idx} class="podcast-speaker-card">
+              <div class="podcast-speaker-header">
+                <span class="podcast-speaker-title">说话人 {idx + 1}</span>
+                {(profile.speakers?.length || 0) > 1 && (
+                  <button class="podcast-speaker-remove" onClick={() => removeSpeaker(idx)}>
+                    移除
+                  </button>
+                )}
+              </div>
+              <div class="podcast-speaker-fields">
+                <div class="podcast-speaker-field">
+                  <label>名称</label>
+                  <input
+                    value={speaker.name || ""}
+                    onInput={(e) => updateSpeaker(idx, "name", (e.target as HTMLInputElement).value)}
+                    placeholder="主持人"
+                  />
+                </div>
+                <div class="podcast-speaker-field">
+                  <label>音色</label>
+                  <select
+                    value={speaker.voice_id || ""}
+                    onChange={(e) => updateSpeaker(idx, "voice_id", e.currentTarget.value)}
+                  >
+                    {voices.map((v) => (
+                      <option key={v.id} value={v.id}>{v.name} ({v.gender})</option>
+                    ))}
+                  </select>
+                </div>
+                <div class="podcast-speaker-field full">
+                  <label>人设背景</label>
+                  <input
+                    value={speaker.backstory || ""}
+                    onInput={(e) => updateSpeaker(idx, "backstory", (e.target as HTMLInputElement).value)}
+                    placeholder="可选"
+                  />
+                </div>
+                <div class="podcast-speaker-field full">
+                  <label>性格特征</label>
+                  <input
+                    value={speaker.personality || ""}
+                    onInput={(e) => updateSpeaker(idx, "personality", (e.target as HTMLInputElement).value)}
+                    placeholder="可选"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+          {(profile.speakers?.length || 0) < 4 && (
+            <button class="podcast-add-speaker-btn" onClick={addSpeaker}>
+              + 添加说话人
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div class="podcast-form-actions">
+        <button class="add-source-action" onClick={onCancel}>取消</button>
+        <button class="add-source-action primary" onClick={onSave}>保存</button>
+      </div>
+    </div>
+  );
+}
+
+function EpisodeProfileEditor({
+  profile,
+  speakerProfiles,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  profile: PodcastEpisodeProfile;
+  speakerProfiles: PodcastSpeakerProfile[];
+  onChange: (p: PodcastEpisodeProfile) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div class="podcast-edit-form">
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">配置名称 *</label>
+        <input
+          class="podcast-form-input"
+          value={profile.name}
+          onInput={(e) => onChange({ ...profile, name: (e.target as HTMLInputElement).value })}
+          placeholder="例如：科技讨论"
+        />
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">关联说话人配置</label>
+        <select
+          class="podcast-form-select"
+          value={profile.speaker_config}
+          onChange={(e) => onChange({ ...profile, speaker_config: e.currentTarget.value })}
+        >
+          <option value="">请选择</option>
+          {speakerProfiles.map((p) => (
+            <option key={p.id} value={p.name}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">大纲生成模型</label>
+        <select
+          class="podcast-form-select"
+          value={profile.outline_model}
+          onChange={(e) => onChange({ ...profile, outline_model: e.currentTarget.value })}
+        >
+          {LLM_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">对话生成模型</label>
+        <select
+          class="podcast-form-select"
+          value={profile.transcript_model}
+          onChange={(e) => onChange({ ...profile, transcript_model: e.currentTarget.value })}
+        >
+          {LLM_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="podcast-form-row">
+        <label class="podcast-form-label">段落数量</label>
+        <input
+          class="podcast-form-input"
+          type="number"
+          min="1"
+          max="10"
+          value={profile.num_segments}
+          onInput={(e) => onChange({ ...profile, num_segments: parseInt((e.target as HTMLInputElement).value) || 4 })}
+        />
+      </div>
+
+      <div class="podcast-form-actions">
+        <button class="add-source-action" onClick={onCancel}>取消</button>
+        <button class="add-source-action primary" onClick={onSave}>保存</button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
@@ -246,6 +480,15 @@ function App() {
   const [deletePodcastRunId, setDeletePodcastRunId] = useState<string | null>(null);
   const [podcastRunDetail, setPodcastRunDetail] = useState<PodcastRunDetail | null>(null);
   const [podcastRunDetailLoading, setPodcastRunDetailLoading] = useState(false);
+
+  // 配置管理状态
+  const [podcastSettingsOpen, setPodcastSettingsOpen] = useState(false);
+  const [podcastSettingsTab, setPodcastSettingsTab] = useState<"speaker" | "episode">("speaker");
+  const [podcastEpisodeProfiles, setPodcastEpisodeProfiles] = useState<PodcastEpisodeProfile[]>([]);
+  const [editingSpeakerProfile, setEditingSpeakerProfile] = useState<PodcastSpeakerProfile | null>(null);
+  const [editingEpisodeProfile, setEditingEpisodeProfile] = useState<PodcastEpisodeProfile | null>(null);
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false);
+  const [podcastSelectedEpisode, setPodcastSelectedEpisode] = useState<string>("");
 
   const [memoryStats, setMemoryStats] = useState<{ chars: number; limit: number; ratio: number }>({
     chars: 0,
@@ -354,6 +597,7 @@ function App() {
     void fetchChatSessions();
     void refreshMemoryStats(sessionId);
     void fetchPodcastSpeakerProfiles();
+    void fetchPodcastEpisodeProfiles();
     void fetchPodcastRuns();
     return () => {
       abortControllerRef.current?.abort();
@@ -525,6 +769,97 @@ function App() {
     setPodcastSpeakerProfiles(Array.isArray(data.results) ? data.results : []);
   };
 
+  const fetchPodcastEpisodeProfiles = async () => {
+    try {
+      const resp = await fetch("/api/podcast/episode-profiles");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setPodcastEpisodeProfiles(Array.isArray(data.results) ? data.results : []);
+    } catch {
+      // ignore
+    }
+  };
+
+  const saveSpeakerProfile = async (profile: Partial<PodcastSpeakerProfile>) => {
+    const isNew = !profile.id || isCreatingProfile;
+    const url = isNew
+      ? "/api/podcast/speaker-profiles"
+      : `/api/podcast/speaker-profiles/${profile.id}`;
+    const method = isNew ? "POST" : "PUT";
+
+    try {
+      const resp = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        alert(err.detail || "保存失败");
+        return false;
+      }
+      await fetchPodcastSpeakerProfiles();
+      return true;
+    } catch {
+      alert("网络错误");
+      return false;
+    }
+  };
+
+  const deleteSpeakerProfile = async (id: string) => {
+    if (!confirm("确定删除此配置？")) return;
+    try {
+      const resp = await fetch(`/api/podcast/speaker-profiles/${id}`, { method: "DELETE" });
+      if (!resp.ok) {
+        alert("删除失败");
+        return;
+      }
+      await fetchPodcastSpeakerProfiles();
+    } catch {
+      alert("网络错误");
+    }
+  };
+
+  const saveEpisodeProfile = async (profile: Partial<PodcastEpisodeProfile>) => {
+    const isNew = !profile.id || isCreatingProfile;
+    const url = isNew
+      ? "/api/podcast/episode-profiles"
+      : `/api/podcast/episode-profiles/${profile.id}`;
+    const method = isNew ? "POST" : "PUT";
+
+    try {
+      const resp = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        alert(err.detail || "保存失败");
+        return false;
+      }
+      await fetchPodcastEpisodeProfiles();
+      return true;
+    } catch {
+      alert("网络错误");
+      return false;
+    }
+  };
+
+  const deleteEpisodeProfile = async (id: string) => {
+    if (!confirm("确定删除此配置？")) return;
+    try {
+      const resp = await fetch(`/api/podcast/episode-profiles/${id}`, { method: "DELETE" });
+      if (!resp.ok) {
+        alert("删除失败");
+        return;
+      }
+      await fetchPodcastEpisodeProfiles();
+    } catch {
+      alert("网络错误");
+    }
+  };
+
   const fetchPodcastRuns = async () => {
     const resp = await fetch("/api/podcast/runs?limit=50");
     if (!resp.ok) {
@@ -628,7 +963,7 @@ function App() {
     const agentPayload = {
       agent_id: "podcast",
       config: {
-        episode_profile: "tech_discussion",
+        episode_profile: podcastSelectedEpisode || "tech_discussion",
         speaker_profile: podcastSelectedSpeaker,
         episode_name: podcastEpisodeName.trim(),
         source_ids: selectedSourceIds,
@@ -2361,9 +2696,26 @@ function App() {
                 播客配置
                 <div class="add-source-subtitle">生成播客</div>
               </div>
-              <button class="add-source-close" type="button" onClick={() => setPodcastConfigOpen(false)}>
-                ×
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  class="podcast-settings-btn"
+                  type="button"
+                  title="配置管理"
+                  onClick={() => setPodcastSettingsOpen(true)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "4px",
+                    borderRadius: "4px",
+                  }}
+                >
+                  <Icons.Settings />
+                </button>
+                <button class="add-source-close" type="button" onClick={() => setPodcastConfigOpen(false)}>
+                  ×
+                </button>
+              </div>
             </div>
 
             <div class="podcast-config-body">
@@ -2376,6 +2728,20 @@ function App() {
                 >
                   <option value="">请选择</option>
                   {podcastSpeakerProfiles.map((p) => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div class="podcast-config-row">
+                <div class="ref-section-title">节目配置</div>
+                <select
+                  class="podcast-config-select"
+                  value={podcastSelectedEpisode}
+                  onChange={(e) => setPodcastSelectedEpisode(e.currentTarget.value)}
+                >
+                  <option value="">请选择（可选）</option>
+                  {podcastEpisodeProfiles.map((p) => (
                     <option key={p.id} value={p.name}>{p.name}</option>
                   ))}
                 </select>
@@ -2553,6 +2919,196 @@ function App() {
                 </div>
               ) : (
                 <div class="ref-muted">暂无数据</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {podcastSettingsOpen && (
+        <div class="add-source-backdrop" onClick={() => {
+          setPodcastSettingsOpen(false);
+          setEditingSpeakerProfile(null);
+          setEditingEpisodeProfile(null);
+          setIsCreatingProfile(false);
+        }}>
+          <div class="podcast-settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div class="add-source-top">
+              <div class="add-source-title">
+                配置管理
+                <div class="add-source-subtitle">说话人配置 / 节目配置</div>
+              </div>
+              <button class="add-source-close" type="button" onClick={() => {
+                setPodcastSettingsOpen(false);
+                setEditingSpeakerProfile(null);
+                setEditingEpisodeProfile(null);
+                setIsCreatingProfile(false);
+              }}>
+                ×
+              </button>
+            </div>
+
+            <div class="podcast-settings-tabs">
+              <button
+                class={`podcast-settings-tab ${podcastSettingsTab === "speaker" ? "active" : ""}`}
+                onClick={() => {
+                  setPodcastSettingsTab("speaker");
+                  setEditingSpeakerProfile(null);
+                  setEditingEpisodeProfile(null);
+                  setIsCreatingProfile(false);
+                }}
+              >
+                说话人配置
+              </button>
+              <button
+                class={`podcast-settings-tab ${podcastSettingsTab === "episode" ? "active" : ""}`}
+                onClick={() => {
+                  setPodcastSettingsTab("episode");
+                  setEditingSpeakerProfile(null);
+                  setEditingEpisodeProfile(null);
+                  setIsCreatingProfile(false);
+                }}
+              >
+                节目配置
+              </button>
+            </div>
+
+            <div class="podcast-settings-body">
+              {podcastSettingsTab === "speaker" && !editingSpeakerProfile && (
+                <div class="podcast-profile-list">
+                  {podcastSpeakerProfiles.map((p) => (
+                    <div key={p.id} class="podcast-profile-item">
+                      <div class="podcast-profile-info">
+                        <div class="podcast-profile-name">{p.name}</div>
+                        <div class="podcast-profile-meta">
+                          {p.tts_provider} • {p.speakers?.length || 0} 位说话人
+                        </div>
+                      </div>
+                      <div class="podcast-profile-actions">
+                        <button
+                          class="podcast-profile-btn edit"
+                          onClick={() => {
+                            setEditingSpeakerProfile(p);
+                            setIsCreatingProfile(false);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          class="podcast-profile-btn delete"
+                          onClick={() => deleteSpeakerProfile(p.id)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    class="podcast-add-btn"
+                    onClick={() => {
+                      setEditingSpeakerProfile({
+                        id: "",
+                        name: "",
+                        description: "",
+                        tts_provider: "dashscope",
+                        tts_model: "cosyvoice-v2",
+                        speakers: [{ name: "主持人", voice_id: "longxiaochun_v2", backstory: "", personality: "" }],
+                      });
+                      setIsCreatingProfile(true);
+                    }}
+                  >
+                    + 新建说话人配置
+                  </button>
+                </div>
+              )}
+
+              {podcastSettingsTab === "speaker" && editingSpeakerProfile && (
+                <SpeakerProfileEditor
+                  profile={editingSpeakerProfile}
+                  onChange={setEditingSpeakerProfile}
+                  onSave={async () => {
+                    const success = await saveSpeakerProfile(editingSpeakerProfile);
+                    if (success) {
+                      setEditingSpeakerProfile(null);
+                      setIsCreatingProfile(false);
+                    }
+                  }}
+                  onCancel={() => {
+                    setEditingSpeakerProfile(null);
+                    setIsCreatingProfile(false);
+                  }}
+                />
+              )}
+
+              {podcastSettingsTab === "episode" && !editingEpisodeProfile && (
+                <div class="podcast-profile-list">
+                  {podcastEpisodeProfiles.map((p) => (
+                    <div key={p.id} class="podcast-profile-item">
+                      <div class="podcast-profile-info">
+                        <div class="podcast-profile-name">{p.name}</div>
+                        <div class="podcast-profile-meta">
+                          {p.outline_model} • {p.num_segments} 段落
+                        </div>
+                      </div>
+                      <div class="podcast-profile-actions">
+                        <button
+                          class="podcast-profile-btn edit"
+                          onClick={() => {
+                            setEditingEpisodeProfile(p);
+                            setIsCreatingProfile(false);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          class="podcast-profile-btn delete"
+                          onClick={() => deleteEpisodeProfile(p.id)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    class="podcast-add-btn"
+                    onClick={() => {
+                      setEditingEpisodeProfile({
+                        id: "",
+                        name: "",
+                        description: "",
+                        speaker_config: podcastSpeakerProfiles[0]?.name || "",
+                        outline_provider: "openai-compatible",
+                        outline_model: "qwen-plus",
+                        transcript_provider: "openai-compatible",
+                        transcript_model: "qwen-turbo",
+                        default_briefing: "",
+                        num_segments: 4,
+                      });
+                      setIsCreatingProfile(true);
+                    }}
+                  >
+                    + 新建节目配置
+                  </button>
+                </div>
+              )}
+
+              {podcastSettingsTab === "episode" && editingEpisodeProfile && (
+                <EpisodeProfileEditor
+                  profile={editingEpisodeProfile}
+                  speakerProfiles={podcastSpeakerProfiles}
+                  onChange={setEditingEpisodeProfile}
+                  onSave={async () => {
+                    const success = await saveEpisodeProfile(editingEpisodeProfile);
+                    if (success) {
+                      setEditingEpisodeProfile(null);
+                      setIsCreatingProfile(false);
+                    }
+                  }}
+                  onCancel={() => {
+                    setEditingEpisodeProfile(null);
+                    setIsCreatingProfile(false);
+                  }}
+                />
               )}
             </div>
           </div>

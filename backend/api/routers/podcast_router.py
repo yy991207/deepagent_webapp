@@ -505,6 +505,17 @@ def podcast_delete_speaker_profile(profile_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.get("/api/podcast/episode-profiles")
+def podcast_list_episode_profiles() -> dict[str, Any]:
+    """获取所有节目配置列表"""
+    svc = build_podcast_middleware()
+    try:
+        results = svc.list_episode_profiles()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc) or "failed") from exc
+    return {"results": results}
+
+
 @router.post("/api/podcast/episode-profiles")
 def podcast_create_episode_profile(payload: dict[str, Any]) -> dict[str, Any]:
     """创建节目配置"""
