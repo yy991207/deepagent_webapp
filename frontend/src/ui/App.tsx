@@ -1853,31 +1853,6 @@ function App() {
 
   return (
     <div class="app-root">
-      {/* Global Header */}
-      <header class="app-header">
-        <div class="header-left">
-          <div class="app-logo">
-            <Icons.NotebookLogo />
-          </div>
-          <h1 class="notebook-title">DeepAgents: AI Coding Assistant & Researcher</h1>
-        </div>
-        <div class="header-right">
-          <button class="create-note-btn">
-            <Icons.Plus />
-            创建笔记本
-          </button>
-          <div class="header-actions">
-            <button class="icon-btn-header">
-              <Icons.Share />
-              <span style={{marginLeft: 4, fontSize: 14, fontWeight: 500}}>分享</span>
-            </button>
-            <button class="icon-btn-header"><Icons.Settings /></button>
-            <button class="icon-btn-header"><Icons.Apps /></button>
-            <div class="user-avatar">Y</div>
-          </div>
-        </div>
-      </header>
-
       {/* Main Body (Three Columns) */}
       <div
         class={`app-body ${isLeftCollapsed ? "left-collapsed" : ""} ${
@@ -2035,50 +2010,6 @@ function App() {
                 添加来源
               </button>
 
-              <div class="source-hint-card">
-                <div class="source-hint-title">
-                  <div class="source-hint-icon"><Icons.Search /></div>
-                  <div class="source-hint-text">
-                    试用 <span class="source-hint-link">Deep Research</span>，获取深度报告和新来源！
-                  </div>
-                </div>
-              </div>
-
-              <div class="source-search-card">
-                <div class="source-search-input-row">
-                  <div class="source-search-icon"><Icons.Search /></div>
-                  <input
-                    class="source-search-input"
-                    placeholder="在网络中搜索新来源"
-                    value={searchValue}
-                    onInput={(e) => setSearchValue((e.target as HTMLInputElement).value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        searchFiles(searchValue);
-                      }
-                    }}
-                  />
-                </div>
-
-                <div class="source-search-controls">
-                  <button class="source-search-chip" type="button">
-                    <span class="chip-icon"><Icons.Globe /></span>
-                    <span class="chip-text">Web</span>
-                  </button>
-                  <button class="source-search-chip" type="button">
-                    <span class="chip-icon"><Icons.Bolt /></span>
-                    <span class="chip-text">Fast Research</span>
-                  </button>
-                  <button
-                    class="source-search-go"
-                    type="button"
-                    onClick={() => searchFiles(searchValue)}
-                  >
-                    <Icons.ArrowRight />
-                  </button>
-                </div>
-              </div>
-
               <div class="source-list-header">
                 <span>选择所有来源</span>
                 <div class="checkbox-wrapper">
@@ -2165,6 +2096,22 @@ function App() {
                   )}
                 </div>
               )}
+
+              <div class="corner-actions">
+                <button class="create-note-btn">
+                  <Icons.Plus />
+                  创建笔记本
+                </button>
+                <div class="header-actions">
+                  <button class="icon-btn-header">
+                    <Icons.Share />
+                    <span style={{ marginLeft: 4, fontSize: 14, fontWeight: 500 }}>分享</span>
+                  </button>
+                  <button class="icon-btn-header"><Icons.Settings /></button>
+                  <button class="icon-btn-header"><Icons.Apps /></button>
+                  <div class="user-avatar">Y</div>
+                </div>
+              </div>
             </div>
           )}
         </aside>

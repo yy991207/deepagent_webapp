@@ -115,3 +115,56 @@
   grid-template-columns: 64px 1fr 64px;
 }
 
+
+.corner-actions {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.corner-actions .create-note-btn {
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+  padding: 6px 12px;
+  gap: 6px;
+}
+
+.corner-actions .create-note-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.corner-actions .header-actions {
+  gap: 6px;
+}
+
+.corner-actions .icon-btn-header {
+  padding: 4px;
+  border-radius: 40%;
+}
+
+.corner-actions .icon-btn-header svg {
+  width: 14px;
+  height: 14px;
+}
+
+.corner-actions .header-actions span {
+  font-size: 12px;
+}
+
+.corner-actions .user-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+
+.left-collapsed .corner-actions {
+  display: none;
+}
+
+
