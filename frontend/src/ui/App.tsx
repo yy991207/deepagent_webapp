@@ -2185,6 +2185,8 @@ function App() {
               // 判断是否是连续工具调用中的第一个（前一个消息不是 tool）
               const prevMessage = index > 0 ? messages[index - 1] : null;
               const isFirstToolInSequence = message.role === "tool" && (!prevMessage || prevMessage.role !== "tool");
+              // 判断 assistant 消息是否紧跟在 tool 消息后面（此时不显示头像，因为 tool 已显示）
+              const isAssistantAfterTool = message.role === "assistant" && prevMessage && prevMessage.role === "tool";
               
               return (
               <div key={message.id} class={`message-row ${message.role}`}>
@@ -2208,10 +2210,12 @@ function App() {
                   </div>
                 ) : message.role === "assistant" ? (
                   <div class="assistant-row">
-                    <div class="assistant-avatar-col">
-                      <div class="assistant-avatar">
-                        <Icons.NotebookLogo />
-                      </div>
+                    <div class={`assistant-avatar-col ${isAssistantAfterTool ? 'avatar-hidden' : ''}`}>
+                      {!isAssistantAfterTool && (
+                        <div class="assistant-avatar">
+                          <Icons.NotebookLogo />
+                        </div>
+                      )}
                     </div>
                     <div class="message-container assistant">
                       <div class={`message-bubble ${message.role}`}>
