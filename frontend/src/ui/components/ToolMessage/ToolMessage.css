@@ -1,0 +1,889 @@
+/* ToolMessage 组件样式 */
+
+/* CSS 变量 */
+:root {
+  --tool-card-bg: #ffffff;
+  --tool-card-border: #e8eaed;
+  --tool-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --tool-header-hover: #f8f9fa;
+  --tool-status-running: #4285f4;
+  --tool-status-done: #34a853;
+  --tool-status-error: #ea4335;
+  --tool-text-primary: #1a1a1a;
+  --tool-text-secondary: #5f6368;
+  --tool-text-muted: #80868b;
+  --tool-code-bg: #f5f7f9;
+  --tool-code-border: #e8eaed;
+  --tool-transition: 0.15s ease;
+}
+
+/* 工具卡片 */
+.tool-card {
+  background: var(--tool-card-bg);
+  border: 1px solid var(--tool-card-border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color var(--tool-transition), box-shadow var(--tool-transition);
+}
+
+.tool-card--running {
+  border-color: var(--tool-status-running);
+  box-shadow: 0 0 0 1px var(--tool-status-running);
+}
+
+.tool-card--done {
+  border-color: var(--tool-card-border);
+}
+
+.tool-card--error {
+  border-color: var(--tool-status-error);
+}
+
+/* 工具头部 */
+.tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--tool-transition);
+}
+
+.tool-header:hover {
+  background: var(--tool-header-hover);
+}
+
+.tool-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tool-header__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-header__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tool-text-secondary);
+}
+
+.tool-header__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-header__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+}
+
+.tool-header__duration {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+  font-family: monospace;
+}
+
+.tool-header__chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tool-text-secondary);
+  transition: transform var(--tool-transition);
+}
+
+.tool-header__chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 状态图标 */
+.tool-status-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tool-status-running {
+  background: var(--tool-status-running);
+  animation: tool-pulse 1.5s ease-in-out infinite;
+}
+
+.tool-status-done {
+  background: var(--tool-status-done);
+  position: relative;
+}
+
+.tool-status-done::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 3px;
+  height: 5px;
+  border-right: 1.5px solid white;
+  border-bottom: 1.5px solid white;
+  margin-top: -1px;
+}
+
+.tool-status-error {
+  background: var(--tool-status-error);
+}
+
+@keyframes tool-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* 工具主体 */
+.tool-body {
+  padding: 0;
+  border-top: 1px solid var(--tool-card-border);
+}
+
+/* 运行中提示 */
+.tool-running-hint {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--tool-text-secondary);
+  font-style: italic;
+}
+
+/* 默认渲染器样式 */
+.tool-default-output {
+  padding: 12px 16px;
+}
+
+.tool-default-output pre {
+  margin: 0;
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tool-text-primary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-default-output__text {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 代码块组件 */
+.tool-code-block {
+  margin: 0;
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.tool-code-block--with-header {
+  border-radius: 0 0 6px 6px;
+  border-top: none;
+}
+
+.tool-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f1f3f4;
+  border: 1px solid var(--tool-code-border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.tool-code-header__language {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tool-text-muted);
+  text-transform: uppercase;
+}
+
+.tool-code-header__copy {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--tool-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background var(--tool-transition);
+}
+
+.tool-code-header__copy:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* 带行号的代码块 */
+.tool-code-block--line-numbers {
+  counter-reset: line;
+}
+
+.tool-code-block--line-numbers .tool-code-line {
+  display: flex;
+}
+
+.tool-code-block--line-numbers .tool-code-line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3em;
+  margin-right: 1em;
+  text-align: right;
+  color: var(--tool-text-muted);
+  user-select: none;
+}
+
+/* 结果列表组件 */
+.tool-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.tool-result-item {
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  transition: transform var(--tool-transition), box-shadow var(--tool-transition);
+}
+
+.tool-result-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tool-result-item__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+  margin-bottom: 4px;
+}
+
+.tool-result-item__subtitle {
+  font-size: 12px;
+  color: var(--tool-text-secondary);
+  margin-bottom: 8px;
+}
+
+.tool-result-item__content {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.5;
+}
+
+/* 文件树组件 */
+.tool-file-tree {
+  padding: 12px 16px;
+}
+
+.tool-file-tree__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background var(--tool-transition);
+}
+
+.tool-file-tree__item:hover {
+  background: var(--tool-header-hover);
+}
+
+.tool-file-tree__icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tool-text-secondary);
+}
+
+.tool-file-tree__name {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+}
+
+.tool-file-tree__item--folder .tool-file-tree__icon {
+  color: #fbbc04;
+}
+
+/* 进度组件 */
+.tool-progress {
+  padding: 12px 16px;
+}
+
+.tool-progress__bar {
+  height: 4px;
+  background: var(--tool-code-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tool-progress__fill {
+  height: 100%;
+  background: var(--tool-status-running);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.tool-progress__text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--tool-text-secondary);
+  text-align: center;
+}
+
+/* 标签组件 */
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  background: var(--tool-code-bg);
+  color: var(--tool-text-secondary);
+}
+
+.tool-badge--success {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.tool-badge--error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.tool-badge--warning {
+  background: #fef7e0;
+  color: #b06000;
+}
+
+.tool-badge--info {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+/* Shell 渲染器 */
+.tool-shell {
+  padding: 12px 16px;
+}
+
+.tool-shell__command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #1a1a1a;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.tool-shell__prompt {
+  color: #4caf50;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.tool-shell__cmd {
+  color: #ffffff;
+  font-family: monospace;
+  font-size: 13px;
+  flex: 1;
+  word-break: break-all;
+}
+
+.tool-shell__output {
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* 文件读取渲染器 */
+.tool-file-read {
+  padding: 12px 16px;
+}
+
+.tool-file-read__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.tool-file-read__path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  font-family: monospace;
+}
+
+.tool-file-read__path svg {
+  width: 14px;
+  height: 14px;
+  color: var(--tool-text-secondary);
+}
+
+.tool-file-read__lines {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+.tool-file-read__content {
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tool-file-read__line {
+  display: flex;
+}
+
+.tool-file-read__line-number {
+  width: 3em;
+  margin-right: 1em;
+  text-align: right;
+  color: var(--tool-text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.tool-file-read__line-content {
+  flex: 1;
+  white-space: pre;
+}
+
+/* 文件写入渲染器 */
+.tool-file-write {
+  padding: 12px 16px;
+}
+
+.tool-file-write__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tool-file-write__path {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  font-family: monospace;
+}
+
+.tool-file-write__status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--tool-status-done);
+}
+
+.tool-file-write__status svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 搜索渲染器 */
+.tool-search {
+  padding: 12px 16px;
+}
+
+.tool-search__query {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.tool-search__query-icon {
+  color: var(--tool-text-muted);
+}
+
+.tool-search__query-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-search__query-text {
+  font-size: 14px;
+  color: var(--tool-text-primary);
+}
+
+.tool-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-search__result {
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  transition: box-shadow var(--tool-transition);
+}
+
+.tool-search__result:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.tool-search__result-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a73e8;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.tool-search__result-title:hover {
+  text-decoration: underline;
+}
+
+.tool-search__result-url {
+  font-size: 12px;
+  color: var(--tool-status-done);
+  margin-bottom: 6px;
+}
+
+.tool-search__result-snippet {
+  font-size: 13px;
+  color: var(--tool-text-secondary);
+  line-height: 1.5;
+}
+
+/* RAG 查询渲染器 */
+.tool-rag {
+  padding: 12px 16px;
+}
+
+.tool-rag__results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-rag__result {
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+}
+
+.tool-rag__result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.tool-rag__result-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+}
+
+.tool-rag__result-source svg {
+  width: 14px;
+  height: 14px;
+  color: var(--tool-text-secondary);
+}
+
+.tool-rag__result-score {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: #e8f0fe;
+  color: #1967d2;
+  border-radius: 4px;
+}
+
+.tool-rag__result-content {
+  font-size: 13px;
+  color: var(--tool-text-secondary);
+  line-height: 1.5;
+}
+
+/* Todos 渲染器 */
+.tool-todos {
+  padding: 12px 16px;
+}
+
+.tool-todos__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tool-todos__header svg {
+  width: 18px;
+  height: 18px;
+  color: var(--tool-status-running);
+}
+
+.tool-todos__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+}
+
+.tool-todos__count {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+.tool-todos__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background var(--tool-transition);
+}
+
+.tool-todo:hover {
+  background: var(--tool-header-hover);
+}
+
+.tool-todo--pending {
+  background: #ffffff;
+}
+
+.tool-todo--in-progress {
+  background: #e8f5e9;
+}
+
+.tool-todo--completed {
+  background: #f5f5f5;
+}
+
+.tool-todo__checkbox {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-todo__checkbox svg {
+  width: 16px;
+  height: 16px;
+  color: var(--tool-status-done);
+}
+
+.tool-todo__circle {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--tool-card-border);
+  border-radius: 50%;
+}
+
+.tool-todo__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--tool-code-bg);
+  border-top-color: var(--tool-status-running);
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tool-todo__content {
+  flex: 1;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.4;
+}
+
+.tool-todo--completed .tool-todo__content {
+  color: var(--tool-text-muted);
+  text-decoration: line-through;
+}
+
+/* 目录列表渲染器 */
+.tool-ls {
+  padding: 12px 16px;
+}
+
+.tool-ls__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.tool-ls__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--tool-code-bg);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  transition: background var(--tool-transition);
+}
+
+.tool-ls__item:hover {
+  background: var(--tool-header-hover);
+}
+
+.tool-ls__item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--tool-text-secondary);
+  flex-shrink: 0;
+}
+
+.tool-ls__item--folder svg {
+  color: #fbbc04;
+}
+
+/* Fetch URL 渲染器 */
+.tool-fetch {
+  padding: 12px 16px;
+}
+
+.tool-fetch__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tool-fetch__url {
+  font-size: 13px;
+  color: #1a73e8;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.tool-fetch__content {
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* JSON 输出 */
+.tool-json {
+  padding: 12px 16px;
+}
+
+.tool-json pre {
+  margin: 0;
+  padding: 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 文本输出 */
+.tool-text {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .tool-header {
+    padding: 10px 12px;
+  }
+
+  .tool-header__title {
+    font-size: 13px;
+  }
+
+  .tool-ls__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-search__results,
+  .tool-rag__results,
+  .tool-result-list {
+    gap: 6px;
+  }
+}

@@ -489,6 +489,12 @@ class ChatStreamService:
                     f"stream_chat finalize | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)} | assistant_chars={len(''.join(assistant_accum))}"
                 )
                 try:
+                    if stream_state.pending_text_deltas:
+                        for delta in stream_state.pending_text_deltas:
+                            assistant_accum.append(str(delta))
+                            yield {"type": "chat.delta", "text": str(delta)}
+                        stream_state.pending_text_deltas = []
+
                     assistant_text = "".join(assistant_accum).strip()
                     suggested_questions: list[str] = []
 

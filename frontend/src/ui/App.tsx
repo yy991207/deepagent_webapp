@@ -41,6 +41,7 @@ import {
 import { useChat } from "./hooks/useChat";
 import { useFileTree } from "./hooks/useFileTree";
 import { FileTree } from "./components/FileTree";
+import { ToolMessage } from "./components/ToolMessage";
 
 
 function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: number; title: string }) {
@@ -3785,8 +3786,8 @@ function AssistantContent({
   return <div class="md-root">{renderMarkdownBlocks(processedText)}</div>;
 }
 
-// Collapsible Tool Message Component
-function ToolMessage({
+// Collapsible Tool Message Component (Legacy - 保留旧实现作为备份)
+function ToolMessageLegacy({
   toolName,
   status,
   args,
