@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useState } from "react";
 
 export interface CodeBlockProps {
   code: string;
@@ -32,28 +32,28 @@ export function CodeBlock({
   const lines = code.split("\n");
 
   return (
-    <div class="tool-code-block-wrapper">
+    <div className="tool-code-block-wrapper">
       {showHeader && (language || showCopy) && (
-        <div class="tool-code-header">
+        <div className="tool-code-header">
           {language && (
-            <span class="tool-code-header__language">{language}</span>
+            <span className="tool-code-header__language">{language}</span>
           )}
           {showCopy && (
-            <button class="tool-code-header__copy" onClick={handleCopy}>
+            <button className="tool-code-header__copy" onClick={handleCopy}>
               {copied ? "已复制" : "复制"}
             </button>
           )}
         </div>
       )}
       <pre
-        class={`tool-code-block ${showHeader && language ? "tool-code-block--with-header" : ""} ${showLineNumbers ? "tool-code-block--line-numbers" : ""}`}
+        className={`tool-code-block ${showHeader && language ? "tool-code-block--with-header" : ""} ${showLineNumbers ? "tool-code-block--line-numbers" : ""}`}
         style={{ maxHeight: `${maxHeight}px` }}
       >
         {showLineNumbers ? (
           lines.map((line, idx) => (
-            <div key={idx} class="tool-code-line">
-              <span class="tool-code-line__number">{idx + 1}</span>
-              <span class="tool-code-line__content">{line}</span>
+            <div key={idx} className="tool-code-line">
+              <span className="tool-code-line__number">{idx + 1}</span>
+              <span className="tool-code-line__content">{line}</span>
             </div>
           ))
         ) : (
@@ -73,9 +73,9 @@ export function CommandBlock({
   prompt?: string;
 }) {
   return (
-    <div class="tool-shell__command">
-      <span class="tool-shell__prompt">{prompt}</span>
-      <span class="tool-shell__cmd">{command}</span>
+    <div className="tool-shell__command">
+      <span className="tool-shell__prompt">{prompt}</span>
+      <span className="tool-shell__cmd">{command}</span>
     </div>
   );
 }

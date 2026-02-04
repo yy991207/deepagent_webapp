@@ -41,7 +41,7 @@ export function FileIcon({ type, expanded }: FileIconProps) {
 
   if (type === "folder") {
     return (
-      <span class="file-icon" style={{ color }}>
+      <span className="file-icon" style={{ color }}>
         {expanded ? (
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h3.172a1.5 1.5 0 0 1 1.06.44l.829.828a.5.5 0 0 0 .353.147H13.5A1.5 1.5 0 0 1 15 4.915V12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z" />
@@ -59,7 +59,7 @@ export function FileIcon({ type, expanded }: FileIconProps) {
   const iconPath = getIconPath(type);
 
   return (
-    <span class="file-icon" style={{ color }}>
+    <span className="file-icon" style={{ color }}>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
         <path d={iconPath} />
       </svg>

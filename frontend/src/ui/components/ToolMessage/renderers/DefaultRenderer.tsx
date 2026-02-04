@@ -15,14 +15,14 @@ export function DefaultRenderer({ status, args, output }: ToolRendererProps) {
   const data = status === "running" ? args : output;
   
   if (!data) {
-    return <div class="tool-empty">暂无可展示内容</div>;
+    return <div className="tool-empty">暂无可展示内容</div>;
   }
 
   // 字符串直接显示
   if (typeof data === "string") {
-    return <pre class="tool-text-output">{data}</pre>;
+    return <pre className="tool-text-output">{data}</pre>;
   }
 
   // 对象/数组显示为 JSON
-  return <pre class="tool-json-output">{formatJson(data)}</pre>;
+  return <pre className="tool-json-output">{formatJson(data)}</pre>;
 }

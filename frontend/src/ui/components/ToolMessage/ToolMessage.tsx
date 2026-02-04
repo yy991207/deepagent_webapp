@@ -1,10 +1,17 @@
-import { useState, useMemo, useEffect } from "preact/hooks";
+import { useState, useMemo, useEffect } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Card, CardContent } from "@/ui/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/ui/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import { getToolConfig } from "./registry";
 import { registerAllRenderers } from "./renderers";
 import { DefaultRenderer } from "./renderers/DefaultRenderer";
 import { Icons } from "./Icons";
 import type { ToolMessageProps, ToolStatus } from "./types";
-import "./ToolMessage.css";
 
 // 初始化渲染器注册表
 let initialized = false;
@@ -15,72 +22,18 @@ function ensureInitialized() {
   }
 }
 
-// 状态图标组件
-function StatusIcon({ status }: { status: ToolStatus }) {
-  if (status === "running") {
-    return <span class="tool-status-icon tool-status-running" />;
-  }
-  if (status === "error") {
-    return <span class="tool-status-icon tool-status-error" />;
-  }
-  return <span class="tool-status-icon tool-status-done" />;
-}
-
-// 工具卡片组件
-function ToolCard({
-  status,
-  children,
-  className = "",
-}: {
-  status: ToolStatus;
-  children: preact.ComponentChildren;
-  className?: string;
-}) {
-  const statusClass = {
-    running: "tool-card--running",
-    done: "tool-card--done",
-    error: "tool-card--error",
-  }[status];
+// 状态指示器组件
+function StatusIndicator({ status }: { status: ToolStatus }) {
+  const statusStyles = {
+    running: "bg-blue-500 animate-pulse",
+    done: "bg-green-500",
+    error: "bg-red-500",
+  };
 
   return (
-    <div class={`tool-card ${statusClass} ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-// 工具头部组件
-function ToolHeader({
-  icon,
-  title,
-  status,
-  duration,
-  isOpen,
-  onToggle,
-}: {
-  icon: preact.ComponentChild;
-  title: string;
-  status: ToolStatus;
-  duration?: string | null;
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div class="tool-header" onClick={onToggle}>
-      <div class="tool-header__left">
-        <StatusIcon status={status} />
-        <span class="tool-header__icon">{icon}</span>
-        <span class="tool-header__title">{title}</span>
-      </div>
-      <div class="tool-header__right">
-        {duration && (
-          <span class="tool-header__duration">{duration}s</span>
-        )}
-        <span class="tool-header__chevron">
-          {isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
-        </span>
-      </div>
-    </div>
+    <span
+      className={cn("w-2 h-2 rounded-full flex-shrink-0", statusStyles[status])}
+    />
   );
 }
 
@@ -99,7 +52,7 @@ export function ToolMessage({
   useEffect(() => {
     ensureInitialized();
   }, []);
-  
+
   ensureInitialized();
 
   // 获取工具配置
@@ -136,34 +89,72 @@ export function ToolMessage({
       ? ((endTime - startTime) / 1000).toFixed(2)
       : null;
 
-  return (
-    <ToolCard status={status}>
-      <ToolHeader
-        icon={<Icon />}
-        title={displayName}
-        status={status}
-        duration={duration}
-        isOpen={isOpen}
-        onToggle={() => setIsOpen(!isOpen)}
-      />
+  // 状态对应的边框样式
+  const statusBorderStyles = {
+    running: "border-blue-400 shadow-sm shadow-blue-100",
+    done: "border-border",
+    error: "border-red-400",
+  };
 
-      {isOpen && (
-        <div class="tool-body">
-          {runningHint ? (
-            <div class="tool-running-hint">{runningHint}</div>
-          ) : (
-            <Renderer
-              status={status}
-              args={args}
-              output={output}
-              startTime={startTime}
-              endTime={endTime}
-              metadata={metadata}
-            />
-          )}
-        </div>
+  return (
+    <Card
+      className={cn(
+        "overflow-hidden transition-all py-0 gap-0",
+        statusBorderStyles[status]
       )}
-    </ToolCard>
+    >
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger className="w-full">
+          <div
+            className={cn(
+              "flex items-center justify-between px-4 py-3 cursor-pointer",
+              "hover:bg-muted/50 transition-colors"
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <StatusIndicator status={status} />
+              <span className="text-muted-foreground">
+                <Icon />
+              </span>
+              <span className="font-medium text-sm">{displayName}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {duration && (
+                <span className="text-xs text-muted-foreground font-mono">
+                  {duration}s
+                </span>
+              )}
+              {isOpen ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              )}
+            </div>
+          </div>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <CardContent className="pt-0 pb-4 border-t">
+            {runningHint ? (
+              <div className="py-3 text-sm text-muted-foreground italic">
+                {runningHint}
+              </div>
+            ) : (
+              <div className="pt-3">
+                <Renderer
+                  status={status}
+                  args={args}
+                  output={output}
+                  startTime={startTime}
+                  endTime={endTime}
+                  metadata={metadata}
+                />
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 }
 

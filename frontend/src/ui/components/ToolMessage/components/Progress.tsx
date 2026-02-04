@@ -21,15 +21,15 @@ export function Progress({
   }[color];
 
   return (
-    <div class="tool-progress">
-      <div class="tool-progress__bar">
+    <div className="tool-progress">
+      <div className="tool-progress__bar">
         <div
-          class={`tool-progress__fill ${colorClass}`}
+          className={`tool-progress__fill ${colorClass}`}
           style={{ width: `${clampedValue}%` }}
         />
       </div>
       {(text || showPercentage) && (
-        <div class="tool-progress__text">
+        <div className="tool-progress__text">
           {text || `${clampedValue.toFixed(0)}%`}
         </div>
       )}
@@ -40,11 +40,11 @@ export function Progress({
 // 不确定进度条（加载中）
 export function IndeterminateProgress({ text }: { text?: string }) {
   return (
-    <div class="tool-progress">
-      <div class="tool-progress__bar tool-progress__bar--indeterminate">
-        <div class="tool-progress__fill tool-progress__fill--indeterminate" />
+    <div className="tool-progress">
+      <div className="tool-progress__bar tool-progress__bar--indeterminate">
+        <div className="tool-progress__fill tool-progress__fill--indeterminate" />
       </div>
-      {text && <div class="tool-progress__text">{text}</div>}
+      {text && <div className="tool-progress__text">{text}</div>}
     </div>
   );
 }

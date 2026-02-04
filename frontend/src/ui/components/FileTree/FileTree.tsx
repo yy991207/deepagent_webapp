@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "preact/hooks";
+import { useCallback, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import type { SourceItem, SourceTreeNode, DragState, DragPosition } from "../../types";
 import { FileTreeNode } from "./FileTreeNode";
 import "./FileTree.css";
@@ -83,14 +84,14 @@ export function FileTree({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const handleDragOver = useCallback(
-    (e: DragEvent) => {
+    (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
     },
     []
   );
 
   const handleDrop = useCallback(
-    (e: DragEvent) => {
+    (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       onDrop();
     },
@@ -108,12 +109,12 @@ export function FileTree({
   return (
     <div
       ref={containerRef}
-      class="file-tree"
+      className="file-tree"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
       {tree.length === 0 ? (
-        <div class="file-tree-empty">暂无数据源</div>
+        <div className="file-tree-empty">暂无数据源</div>
       ) : (
         tree.map((node) => (
           <FileTreeNode

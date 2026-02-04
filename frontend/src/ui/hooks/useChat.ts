@@ -1,4 +1,4 @@
-import { useState, useRef } from "preact/hooks";
+import { useState, useRef } from "react";
 import type { ChatMessage, SocketPayload, RagReference, AttachmentMeta } from "../types";
 import { createId } from "../types/utils";
 

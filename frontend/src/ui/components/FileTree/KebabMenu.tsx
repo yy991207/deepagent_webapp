@@ -1,10 +1,10 @@
-import type { ComponentChild } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import type { ReactNode } from "react";
+import { useEffect, useRef } from "react";
 
 export type MenuItem = {
   id: string;
   label: string;
-  icon?: ComponentChild;
+  icon?: ReactNode;
   danger?: boolean;
 };
 
@@ -43,18 +43,18 @@ export function KebabMenu({ items, onAction, onClose }: KebabMenuProps) {
   }, [onClose]);
 
   return (
-    <div ref={menuRef} class="kebab-menu">
+    <div ref={menuRef} className="kebab-menu">
       {items.map((item) => (
         <button
           key={item.id}
-          class={`kebab-menu-item ${item.danger ? "danger" : ""}`}
+          className={`kebab-menu-item ${item.danger ? "danger" : ""}`}
           onClick={(e) => {
             e.stopPropagation();
             onAction(item.id);
           }}
         >
-          {item.icon && <span class="menu-icon">{item.icon}</span>}
-          <span class="menu-label">{item.label}</span>
+          {item.icon && <span className="menu-icon">{item.icon}</span>}
+          <span className="menu-label">{item.label}</span>
         </button>
       ))}
     </div>

@@ -1,9 +1,14 @@
-import { render } from "preact";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 import { App } from "./ui/App";
-import "./ui/styles/styles.css";
+import "./ui/styles/globals.css";
 
-const root = document.getElementById("root");
-
-if (root) {
-  render(<App />, root);
+const container = document.getElementById("root");
+if (container) {
+  const root = createRoot(container);
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
 }

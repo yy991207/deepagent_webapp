@@ -42,8 +42,8 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
 
   if (items.length === 0) {
     return (
-      <div class="tool-todos">
-        <div class="tool-text">暂无任务</div>
+      <div className="tool-todos">
+        <div className="tool-text">暂无任务</div>
       </div>
     );
   }

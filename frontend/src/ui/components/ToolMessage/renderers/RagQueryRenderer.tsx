@@ -6,17 +6,17 @@ export function RagQueryRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-rag">
-        <div class="tool-search__query">
-          <span class="tool-search__query-icon">
+      <div className="tool-rag">
+        <div className="tool-search__query">
+          <span className="tool-search__query-icon">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
               <polyline points="14,2 14,8 20,8"/>
             </svg>
           </span>
-          <span class="tool-search__query-text">{query}</span>
+          <span className="tool-search__query-text">{query}</span>
         </div>
-        <div class="tool-running-hint">正在检索知识库...</div>
+        <div className="tool-running-hint">正在检索知识库...</div>
       </div>
     );
   }
@@ -52,21 +52,21 @@ export function RagQueryRenderer({ status, args, output }: ToolRendererProps) {
   }
 
   return (
-    <div class="tool-rag">
-      <div class="tool-search__query">
-        <span class="tool-search__query-icon">
+    <div className="tool-rag">
+      <div className="tool-search__query">
+        <span className="tool-search__query-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
             <polyline points="14,2 14,8 20,8"/>
           </svg>
         </span>
-        <span class="tool-search__query-text">{query}</span>
+        <span className="tool-search__query-text">{query}</span>
       </div>
       
       {results.length > 0 ? (
         <RagResultList results={results} />
       ) : (
-        <div class="tool-text">
+        <div className="tool-text">
           {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
         </div>
       )}

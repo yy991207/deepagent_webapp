@@ -1,4 +1,4 @@
-import type { ComponentType, ComponentChild } from "preact";
+import type { ComponentType, ReactNode } from "react";
 
 // 工具状态
 export type ToolStatus = "running" | "done" | "error";
@@ -44,13 +44,13 @@ export interface ToolRendererConfig {
 // 工具卡片 Props
 export interface ToolCardProps {
   status: ToolStatus;
-  children: ComponentChild;
+  children: ReactNode;
   className?: string;
 }
 
 // 工具头部 Props
 export interface ToolHeaderProps {
-  icon: ComponentChild;
+  icon: ReactNode;
   title: string;
   status: ToolStatus;
   duration?: string | null;

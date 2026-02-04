@@ -1,10 +1,10 @@
-import type { ComponentChildren } from "preact";
+import type { ReactNode } from "react";
 
 export interface ResultListItem {
   id?: string;
   title?: string;
   subtitle?: string;
-  content?: ComponentChildren;
+  content?: ReactNode;
   url?: string;
   score?: number;
   metadata?: Record<string, unknown>;
@@ -14,7 +14,7 @@ export interface ResultListProps {
   items: ResultListItem[];
   emptyMessage?: string;
   onItemClick?: (item: ResultListItem, index: number) => void;
-  renderItem?: (item: ResultListItem, index: number) => ComponentChildren;
+  renderItem?: (item: ResultListItem, index: number) => ReactNode;
 }
 
 // 默认项目渲染器
@@ -27,20 +27,20 @@ function DefaultResultItem({
 }) {
   return (
     <div
-      class={`tool-result-item ${onClick ? "tool-result-item--clickable" : ""}`}
+      className={`tool-result-item ${onClick ? "tool-result-item--clickable" : ""}`}
       onClick={onClick}
     >
       {item.title && (
-        <div class="tool-result-item__title">{item.title}</div>
+        <div className="tool-result-item__title">{item.title}</div>
       )}
       {item.subtitle && (
-        <div class="tool-result-item__subtitle">{item.subtitle}</div>
+        <div className="tool-result-item__subtitle">{item.subtitle}</div>
       )}
       {item.content && (
-        <div class="tool-result-item__content">{item.content}</div>
+        <div className="tool-result-item__content">{item.content}</div>
       )}
       {item.score !== undefined && (
-        <span class="tool-result-item__score">
+        <span className="tool-result-item__score">
           相关度: {(item.score * 100).toFixed(0)}%
         </span>
       )}
@@ -56,17 +56,17 @@ export function ResultList({
 }: ResultListProps) {
   if (items.length === 0) {
     return (
-      <div class="tool-result-list tool-result-list--empty">
-        <span class="tool-result-list__empty-message">{emptyMessage}</span>
+      <div className="tool-result-list tool-result-list--empty">
+        <span className="tool-result-list__empty-message">{emptyMessage}</span>
       </div>
     );
   }
 
   return (
-    <div class="tool-result-list">
+    <div className="tool-result-list">
       {items.map((item, index) =>
         renderItem ? (
-          <div key={item.id || index} class="tool-result-list__item">
+          <div key={item.id || index} className="tool-result-list__item">
             {renderItem(item, index)}
           </div>
         ) : (
@@ -96,11 +96,11 @@ export function SearchResultList({
   onResultClick?: (result: SearchResult) => void;
 }) {
   return (
-    <div class="tool-search__results">
+    <div className="tool-search__results">
       {results.map((result, idx) => (
-        <div key={idx} class="tool-search__result">
+        <div key={idx} className="tool-search__result">
           <a
-            class="tool-search__result-title"
+            className="tool-search__result-title"
             href={result.url}
             target="_blank"
             rel="noopener noreferrer"
@@ -113,9 +113,9 @@ export function SearchResultList({
           >
             {result.title}
           </a>
-          <div class="tool-search__result-url">{result.url}</div>
+          <div className="tool-search__result-url">{result.url}</div>
           {result.snippet && (
-            <div class="tool-search__result-snippet">{result.snippet}</div>
+            <div className="tool-search__result-snippet">{result.snippet}</div>
           )}
         </div>
       ))}
@@ -132,11 +132,11 @@ export interface RagResult {
 
 export function RagResultList({ results }: { results: RagResult[] }) {
   return (
-    <div class="tool-rag__results">
+    <div className="tool-rag__results">
       {results.map((result, idx) => (
-        <div key={idx} class="tool-rag__result">
-          <div class="tool-rag__result-header">
-            <span class="tool-rag__result-source">
+        <div key={idx} className="tool-rag__result">
+          <div className="tool-rag__result-header">
+            <span className="tool-rag__result-source">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                 <polyline points="14,2 14,8 20,8" />
@@ -144,12 +144,12 @@ export function RagResultList({ results }: { results: RagResult[] }) {
               {result.source}
             </span>
             {result.score !== undefined && (
-              <span class="tool-rag__result-score">
+              <span className="tool-rag__result-score">
                 {(result.score * 100).toFixed(0)}%
               </span>
             )}
           </div>
-          <div class="tool-rag__result-content">{result.content}</div>
+          <div className="tool-rag__result-content">{result.content}</div>
         </div>
       ))}
     </div>

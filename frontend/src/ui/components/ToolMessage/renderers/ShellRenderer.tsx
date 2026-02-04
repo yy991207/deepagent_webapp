@@ -7,9 +7,9 @@ export function ShellRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-shell">
+      <div className="tool-shell">
         <CommandBlock command={command} />
-        <div class="tool-running-hint">
+        <div className="tool-running-hint">
           {cwd ? `在 ${cwd} 目录中执行命令...` : "正在执行命令..."}
         </div>
       </div>
@@ -32,17 +32,17 @@ export function ShellRenderer({ status, args, output }: ToolRendererProps) {
   }
 
   return (
-    <div class="tool-shell">
+    <div className="tool-shell">
       <CommandBlock command={command} />
       
       {outputText && (
-        <div class="tool-shell__output">
+        <div className="tool-shell__output">
           {outputText}
         </div>
       )}
       
       {exitCode !== null && exitCode !== 0 && (
-        <div class="tool-shell__exit-code">
+        <div className="tool-shell__exit-code">
           退出码: {exitCode}
         </div>
       )}

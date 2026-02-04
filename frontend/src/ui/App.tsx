@@ -1,5 +1,5 @@
-import type { ComponentChild } from "preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   TreeNode,
@@ -42,6 +42,7 @@ import { useChat } from "./hooks/useChat";
 import { useFileTree } from "./hooks/useFileTree";
 import { FileTree } from "./components/FileTree";
 import { ToolMessage } from "./components/ToolMessage";
+import { AssistantContent } from "./components/Chat/AssistantContent";
 
 
 function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: number; title: string }) {
@@ -54,14 +55,14 @@ function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: num
   const progressColor = chars < 4000 ? "#34a853" : "#f9ab00";
 
   return (
-    <div class="memory-ring" title={title} aria-label={title}>
+    <div className="memory-ring" title={title} aria-label={title}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           stroke="rgba(60, 64, 67, 0.45)"
-          stroke-width={stroke}
+          strokeWidth={stroke}
           fill="none"
         />
         <circle
@@ -69,11 +70,11 @@ function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: num
           cy={size / 2}
           r={r}
           stroke={progressColor}
-          stroke-width={stroke}
+          strokeWidth={stroke}
           fill="none"
-          stroke-linecap="round"
-          stroke-dasharray={c}
-          stroke-dashoffset={dashOffset}
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={dashOffset}
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </svg>
@@ -133,10 +134,10 @@ const upsertToolMessage = (
 const Icons = {
   Logo: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>, // Simplified logo
   NotebookLogo: () => (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-       <circle cx="12" cy="12" r="10" stroke="black" stroke-width="2" fill="none" />
-       <path d="M8 12a4 4 0 0 1 8 0" stroke="black" stroke-width="2" stroke-linecap="round" />
-       <path d="M12 8v8" stroke="black" stroke-width="2" stroke-linecap="round" />
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+       <circle cx="12" cy="12" r="10" stroke="black" strokeWidth="2" fill="none" />
+       <path d="M8 12a4 4 0 0 1 8 0" stroke="black" strokeWidth="2" strokeLinecap="round" />
+       <path d="M12 8v8" stroke="black" strokeWidth="2" strokeLinecap="round" />
     </svg>
   ), // Mock abstract logo
   Plus: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>,
@@ -165,27 +166,27 @@ const Icons = {
   ChevronRight: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>,
   ChevronLeft: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l-1.41 1.41L8 12l4.59 4.59L14 18l-6-6z"/></svg>,
   PanelCollapseLeft: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <path d="M14 8l-4 4 4 4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M14 8l-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   PanelExpandLeft: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <path d="M10 8l4 4-4 4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M10 8l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   PanelCollapseRight: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <path d="M10 8l4 4-4 4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M10 8l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   PanelExpandRight: () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
-      <path d="M14 8l-4 4 4 4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M14 8l-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   ChevronDown: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>,
@@ -262,21 +263,21 @@ function SpeakerProfileEditor({
   };
 
   return (
-    <div class="podcast-edit-form">
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">配置名称 *</label>
+    <div className="podcast-edit-form">
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">配置名称 *</label>
         <input
-          class="podcast-form-input"
+          className="podcast-form-input"
           value={profile.name}
           onInput={(e) => onChange({ ...profile, name: (e.target as HTMLInputElement).value })}
           placeholder="例如：双人对话"
         />
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">TTS 提供商</label>
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">TTS 提供商</label>
         <select
-          class="podcast-form-select"
+          className="podcast-form-select"
           value={profile.tts_provider}
           onChange={(e) => {
             const newProvider = e.currentTarget.value;
@@ -295,21 +296,21 @@ function SpeakerProfileEditor({
         </select>
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">说话人列表 ({profile.speakers?.length || 0}/4)</label>
-        <div class="podcast-speakers-list">
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">说话人列表 ({profile.speakers?.length || 0}/4)</label>
+        <div className="podcast-speakers-list">
           {(profile.speakers || []).map((speaker, idx) => (
-            <div key={idx} class="podcast-speaker-card">
-              <div class="podcast-speaker-header">
-                <span class="podcast-speaker-title">说话人 {idx + 1}</span>
+            <div key={idx} className="podcast-speaker-card">
+              <div className="podcast-speaker-header">
+                <span className="podcast-speaker-title">说话人 {idx + 1}</span>
                 {(profile.speakers?.length || 0) > 1 && (
-                  <button class="podcast-speaker-remove" onClick={() => removeSpeaker(idx)}>
+                  <button className="podcast-speaker-remove" onClick={() => removeSpeaker(idx)}>
                     移除
                   </button>
                 )}
               </div>
-              <div class="podcast-speaker-fields">
-                <div class="podcast-speaker-field">
+              <div className="podcast-speaker-fields">
+                <div className="podcast-speaker-field">
                   <label>名称</label>
                   <input
                     value={speaker.name || ""}
@@ -317,7 +318,7 @@ function SpeakerProfileEditor({
                     placeholder="主持人"
                   />
                 </div>
-                <div class="podcast-speaker-field">
+                <div className="podcast-speaker-field">
                   <label>音色</label>
                   <select
                     value={speaker.voice_id || ""}
@@ -328,7 +329,7 @@ function SpeakerProfileEditor({
                     ))}
                   </select>
                 </div>
-                <div class="podcast-speaker-field full">
+                <div className="podcast-speaker-field full">
                   <label>人设背景</label>
                   <input
                     value={speaker.backstory || ""}
@@ -336,7 +337,7 @@ function SpeakerProfileEditor({
                     placeholder="可选"
                   />
                 </div>
-                <div class="podcast-speaker-field full">
+                <div className="podcast-speaker-field full">
                   <label>性格特征</label>
                   <input
                     value={speaker.personality || ""}
@@ -348,16 +349,16 @@ function SpeakerProfileEditor({
             </div>
           ))}
           {(profile.speakers?.length || 0) < 4 && (
-            <button class="podcast-add-speaker-btn" onClick={addSpeaker}>
+            <button className="podcast-add-speaker-btn" onClick={addSpeaker}>
               + 添加说话人
             </button>
           )}
         </div>
       </div>
 
-      <div class="podcast-form-actions">
-        <button class="add-source-action" onClick={onCancel}>取消</button>
-        <button class="add-source-action primary" onClick={onSave}>保存</button>
+      <div className="podcast-form-actions">
+        <button className="add-source-action" onClick={onCancel}>取消</button>
+        <button className="add-source-action primary" onClick={onSave}>保存</button>
       </div>
     </div>
   );
@@ -377,21 +378,21 @@ function EpisodeProfileEditor({
   onCancel: () => void;
 }) {
   return (
-    <div class="podcast-edit-form">
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">配置名称 *</label>
+    <div className="podcast-edit-form">
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">配置名称 *</label>
         <input
-          class="podcast-form-input"
+          className="podcast-form-input"
           value={profile.name}
           onInput={(e) => onChange({ ...profile, name: (e.target as HTMLInputElement).value })}
           placeholder="例如：科技讨论"
         />
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">关联说话人配置</label>
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">关联说话人配置</label>
         <select
-          class="podcast-form-select"
+          className="podcast-form-select"
           value={profile.speaker_config}
           onChange={(e) => onChange({ ...profile, speaker_config: e.currentTarget.value })}
         >
@@ -402,10 +403,10 @@ function EpisodeProfileEditor({
         </select>
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">大纲生成模型</label>
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">大纲生成模型</label>
         <select
-          class="podcast-form-select"
+          className="podcast-form-select"
           value={profile.outline_model}
           onChange={(e) => onChange({ ...profile, outline_model: e.currentTarget.value })}
         >
@@ -415,10 +416,10 @@ function EpisodeProfileEditor({
         </select>
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">对话生成模型</label>
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">对话生成模型</label>
         <select
-          class="podcast-form-select"
+          className="podcast-form-select"
           value={profile.transcript_model}
           onChange={(e) => onChange({ ...profile, transcript_model: e.currentTarget.value })}
         >
@@ -428,10 +429,10 @@ function EpisodeProfileEditor({
         </select>
       </div>
 
-      <div class="podcast-form-row">
-        <label class="podcast-form-label">段落数量</label>
+      <div className="podcast-form-row">
+        <label className="podcast-form-label">段落数量</label>
         <input
-          class="podcast-form-input"
+          className="podcast-form-input"
           type="number"
           min="1"
           max="10"
@@ -440,9 +441,9 @@ function EpisodeProfileEditor({
         />
       </div>
 
-      <div class="podcast-form-actions">
-        <button class="add-source-action" onClick={onCancel}>取消</button>
-        <button class="add-source-action primary" onClick={onSave}>保存</button>
+      <div className="podcast-form-actions">
+        <button className="add-source-action" onClick={onCancel}>取消</button>
+        <button className="add-source-action primary" onClick={onSave}>保存</button>
       </div>
     </div>
   );
@@ -1236,7 +1237,12 @@ function App() {
         return baseMessage;
       });
     setMessages(mapped);
-    console.log("历史会话加载完成，文档绑定情况:", Array.from(assistantWritesMap.entries()).map(([id, writes]) => ({ assistantId: id, writeCount: writes.length })));
+    if (import.meta.env.DEV) {
+      console.log(
+        "历史会话加载完成，文档绑定情况:",
+        Array.from(assistantWritesMap.entries()).map(([id, writes]) => ({ assistantId: id, writeCount: writes.length }))
+      );
+    }
   };
 
   useEffect(() => {
@@ -1885,19 +1891,19 @@ function App() {
   };
 
   return (
-    <div class="app-root">
+    <div className="app-root">
       {/* Main Body (Three Columns) */}
       <div
-        class={`app-body ${isLeftCollapsed ? "left-collapsed" : ""} ${
+        className={`app-body ${isLeftCollapsed ? "left-collapsed" : ""} ${
           isRightCollapsed ? "right-collapsed" : ""
         } ${isLeftCollapsed && isRightCollapsed ? "both-collapsed" : ""}`}
       >
         {/* Left Sidebar: Sources */}
-        <aside class="sidebar left-sidebar">
+        <aside className="sidebar left-sidebar">
           {isLeftCollapsed ? (
-            <div class="sidebar-rail">
+            <div className="sidebar-rail">
               <button
-                class="sidebar-collapse-icon-btn"
+                className="sidebar-collapse-icon-btn"
                 onClick={() => setIsLeftCollapsed(false)}
                 aria-label="展开来源"
                 type="button"
@@ -1905,7 +1911,7 @@ function App() {
                 <Icons.PanelExpandLeft />
               </button>
               <button
-                class="sidebar-collapse-icon-btn"
+                className="sidebar-collapse-icon-btn"
                 onClick={() => {
                   setIsLeftCollapsed(false);
                   setLeftPanelMode("sources");
@@ -1920,12 +1926,12 @@ function App() {
               </button>
             </div>
           ) : (
-            <div class="sidebar-card">
-              <div class="sidebar-header">
+            <div className="sidebar-card">
+              <div className="sidebar-header">
                 <h2>{leftPanelMode === "sources" ? "数据来源" : "聊天历史"}</h2>
-                <div class="sidebar-header-actions">
+                <div className="sidebar-header-actions">
                   <button
-                    class="sidebar-collapse-icon-btn"
+                    className="sidebar-collapse-icon-btn"
                     onClick={() => setIsLeftCollapsed(true)}
                     aria-label="折叠来源"
                     type="button"
@@ -1938,7 +1944,7 @@ function App() {
               <div style={{ display: "flex", gap: 8, padding: "0 12px 12px" }}>
                 <button
                   type="button"
-                  class="source-search-chip"
+                  className="source-search-chip"
                   style={{ flex: 1, justifyContent: "center", opacity: leftPanelMode === "sources" ? 1 : 0.7 }}
                   onClick={() => setLeftPanelMode("sources")}
                 >
@@ -1946,7 +1952,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  class="source-search-chip"
+                  className="source-search-chip"
                   style={{ flex: 1, justifyContent: "center", opacity: leftPanelMode === "sessions" ? 1 : 0.7 }}
                   onClick={() => {
                     setLeftPanelMode("sessions");
@@ -1960,7 +1966,7 @@ function App() {
               {leftPanelMode === "sessions" ? (
                 <>
                 <button
-                  class="add-source-btn"
+                  className="add-source-btn"
                   type="button"
                   onClick={async () => {
                     const newSid = await createNewSession();
@@ -1974,11 +1980,11 @@ function App() {
                   新增会话
                 </button>
                 <div 
-                  class="source-list" 
+                  className="source-list" 
                   style={{ paddingTop: 0 }}
                   onClick={() => setDeleteSessionId(null)}
                 >
-                  <div class="file-list">
+                  <div className="file-list">
                     {chatSessions.length ? (
                       chatSessions.map((s) => {
                         const active = s.session_id === sessionId;
@@ -1990,7 +1996,7 @@ function App() {
                         return (
                           <div
                             key={s.session_id}
-                            class={`file-item ${active ? "selected" : ""}`}
+                            className={`file-item ${active ? "selected" : ""}`}
                             onClick={(e) => {
                               e.stopPropagation();
                               void switchSession(s.session_id);
@@ -2036,16 +2042,16 @@ function App() {
                         );
                       })
                     ) : (
-                      <div class="ref-muted" style={{ padding: 12 }}>暂无历史对话</div>
+                      <div className="ref-muted" style={{ padding: 12 }}>暂无历史对话</div>
                     )}
                   </div>
                 </div>
                 </>
               ) : (
                 <>
-              <div class="source-actions-row">
+              <div className="source-actions-row">
                 <button
-                  class="add-source-btn"
+                  className="add-source-btn"
                   type="button"
                   onClick={() => {
                     setPendingUploadFiles([]);
@@ -2057,7 +2063,7 @@ function App() {
                   添加来源
                 </button>
                 <button
-                  class="add-folder-btn"
+                  className="add-folder-btn"
                   type="button"
                   onClick={() => {
                     setNewFolderName("");
@@ -2072,7 +2078,7 @@ function App() {
                 </button>
               </div>
 
-              <div class="source-list">
+              <div className="source-list">
                 <FileTree
                   items={fileTreeState.items}
                   expandedIds={fileTreeState.expandedIds}
@@ -2132,30 +2138,30 @@ function App() {
               )}
 
               {uploadState.status !== "idle" && (
-                <div class="upload-status">
+                <div className="upload-status">
                   {uploadState.status === "uploading" && (
-                    <div class="upload-status-row">
-                      <span class="upload-spinner" />
-                      <span class="upload-status-text">正在上传 {uploadState.count} 个文件...</span>
+                    <div className="upload-status-row">
+                      <span className="upload-spinner" />
+                      <span className="upload-status-text">正在上传 {uploadState.count} 个文件...</span>
                     </div>
                   )}
                   {uploadState.status === "done" && (
-                    <div class="upload-status-row">
-                      <span class="upload-status-text">上传完成（{uploadState.count} 个文件）</span>
+                    <div className="upload-status-row">
+                      <span className="upload-status-text">上传完成（{uploadState.count} 个文件）</span>
                     </div>
                   )}
                   {uploadState.status === "error" && (
-                    <div class="upload-status-row">
-                      <span class="upload-status-text">上传失败：{uploadState.message}</span>
+                    <div className="upload-status-row">
+                      <span className="upload-status-text">上传失败：{uploadState.message}</span>
                     </div>
                   )}
                 </div>
               )}
 
-              <div class="corner-actions">
-                <div class="header-actions">
-                  <button class="icon-btn-header" title="设置"><Icons.Settings /></button>
-                  <div class="user-avatar" title="用户">Y</div>
+              <div className="corner-actions">
+                <div className="header-actions">
+                  <button className="icon-btn-header" title="设置"><Icons.Settings /></button>
+                  <div className="user-avatar" title="用户">Y</div>
                 </div>
               </div>
             </div>
@@ -2163,15 +2169,15 @@ function App() {
         </aside>
 
         {/* Main Content: Chat */}
-        <main class="main-content">
-          <header class="chat-header">
-            <div class="chat-title">对话</div>
+        <main className="main-content">
+          <header className="chat-header">
+            <div className="chat-title">对话</div>
           </header>
 
-          <div class="chat-messages">
+          <div className="chat-messages">
             {messages.length === 0 && (
-               <div class="empty-state">
-                  <div class="empty-icon"><Icons.Sparkles /></div>
+               <div className="empty-state">
+                  <div className="empty-icon"><Icons.Sparkles /></div>
                   <p>开始与您的文档对话</p>
                </div>
             )}
@@ -2190,17 +2196,17 @@ function App() {
               const isAssistantAfterTool = message.role === "assistant" && prevMessage && prevMessage.role === "tool";
               
               return (
-              <div key={message.id} class={`message-row ${message.role}`}>
+              <div key={message.id} className={`message-row ${message.role}`}>
                 {message.role === "tool" ? (
-                  <div class="assistant-row">
-                    <div class={`assistant-avatar-col ${!isFirstToolInSequence ? 'avatar-hidden' : ''}`}>
+                  <div className="assistant-row">
+                    <div className={`assistant-avatar-col ${!isFirstToolInSequence ? 'avatar-hidden' : ''}`}>
                       {isFirstToolInSequence && (
-                        <div class="assistant-avatar">
+                        <div className="assistant-avatar">
                           <Icons.NotebookLogo />
                         </div>
                       )}
                     </div>
-                    <div class="tool-wrapper">
+                    <div className="tool-wrapper">
                       <ToolMessage
                         toolName={message.toolName}
                         status={message.status}
@@ -2210,17 +2216,17 @@ function App() {
                     </div>
                   </div>
                 ) : message.role === "assistant" ? (
-                  <div class="assistant-row">
-                    <div class={`assistant-avatar-col ${isAssistantAfterTool ? 'avatar-hidden' : ''}`}>
+                  <div className="assistant-row">
+                    <div className={`assistant-avatar-col ${isAssistantAfterTool ? 'avatar-hidden' : ''}`}>
                       {!isAssistantAfterTool && (
-                        <div class="assistant-avatar">
+                        <div className="assistant-avatar">
                           <Icons.NotebookLogo />
                         </div>
                       )}
                     </div>
-                    <div class="message-container assistant">
-                      <div class={`message-bubble ${message.role}`}>
-                        <div class="message-content">
+                    <div className="message-container assistant">
+                      <div className={`message-bubble ${message.role}`}>
+                        <div className="message-content">
                           <AssistantContent
                             text={message.content}
                             isPending={!!message.isPending}
@@ -2327,7 +2333,7 @@ function App() {
                                     e.currentTarget.style.color = "#6c757d";
                                   }}
                                 >
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                     <polyline points="7 10 12 15 17 10" />
                                     <line x1="12" y1="15" x2="12" y2="3" />
@@ -2338,23 +2344,23 @@ function App() {
                           </div>
                         );
                       })()}
-                      <div class="message-actions">
+                      <div className="message-actions">
                         <button
-                          class="action-btn"
+                          className="action-btn"
                           type="button"
                           onClick={() => handleCopyMessage(message)}
                         >
                           <Icons.Copy />
                         </button>
                         <button
-                          class="action-btn"
+                          className="action-btn"
                           type="button"
                           onClick={() => handleLikeMessage(message)}
                         >
                           <Icons.ThumbUp />
                         </button>
                         <button
-                          class="action-btn"
+                          className="action-btn"
                           type="button"
                           onClick={() => handleDislikeMessage(message)}
                         >
@@ -2362,11 +2368,11 @@ function App() {
                         </button>
                       </div>
                       {message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
-                        <div class="suggested-questions">
+                        <div className="suggested-questions">
                           {message.suggestedQuestions.map((q, idx) => (
                             <button
                               key={idx}
-                              class="suggested-question-btn"
+                              className="suggested-question-btn"
                               type="button"
                               onClick={() => {
                                 setInput(q);
@@ -2381,19 +2387,19 @@ function App() {
                     </div>
                   </div>
                 ) : (
-                  <div class={`message-container ${message.role}`}>
+                  <div className={`message-container ${message.role}`}>
                      {message.role === "user" && message.timestamp && (
-                        <div class="message-meta-row">
-                          <div class="message-meta">今天 • {message.timestamp}</div>
+                        <div className="message-meta-row">
+                          <div className="message-meta">今天 • {message.timestamp}</div>
                         </div>
                      )}
-                     <div class={`message-bubble ${message.role}`}>
-                        <div class="message-content">
+                     <div className={`message-bubble ${message.role}`}>
+                        <div className="message-content">
                           {message.content}
                           {!!message.attachments?.length && (
-                            <div class="message-attachments">
-                              <div class="message-attachments-header">已附带来源</div>
-                              <div class="message-attachments-chips">
+                            <div className="message-attachments">
+                              <div className="message-attachments-header">已附带来源</div>
+                              <div className="message-attachments-chips">
                                 {(message.attachments.filter(Boolean) as AttachmentMeta[]).slice(0, 8).map((p) => {
                                   const mongoId = typeof p === "string" ? p : (p.mongo_id || "");
                                   const filename = typeof p === "string" ? "" : (p.filename || "");
@@ -2402,7 +2408,7 @@ function App() {
                                   return (
                                     <span
                                       key={mongoId || filename || JSON.stringify(p)}
-                                      class="attachment-chip"
+                                      className="attachment-chip"
                                       title={title}
                                     >
                                       {label}
@@ -2410,7 +2416,7 @@ function App() {
                                   );
                                 })}
                                 {message.attachments.length > 8 && (
-                                  <span class="attachment-chip">+{message.attachments.length - 8}</span>
+                                  <span className="attachment-chip">+{message.attachments.length - 8}</span>
                                 )}
                               </div>
                             </div>
@@ -2429,20 +2435,20 @@ function App() {
               const shouldShowThinking = status === "思考中..." && !hasRunningTool;
               if (!shouldShowThinking) return null;
               return (
-                <div class="message-row assistant">
-                  <div class="assistant-row">
-                    <div class="assistant-avatar-col">
-                      <div class="assistant-avatar">
+                <div className="message-row assistant">
+                  <div className="assistant-row">
+                    <div className="assistant-avatar-col">
+                      <div className="assistant-avatar">
                         <Icons.NotebookLogo />
                       </div>
                     </div>
-                    <div class="message-container assistant">
-                      <div class="message-bubble assistant">
-                        <div class="message-content">
-                          <div class="assistant-thinking">
-                            <span class="dot" />
-                            <span class="dot" />
-                            <span class="dot" />
+                    <div className="message-container assistant">
+                      <div className="message-bubble assistant">
+                        <div className="message-content">
+                          <div className="assistant-thinking">
+                            <span className="dot" />
+                            <span className="dot" />
+                            <span className="dot" />
                           </div>
                         </div>
                       </div>
@@ -2454,8 +2460,8 @@ function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div class="input-area">
-            <div class="input-wrapper">
+          <div className="input-area">
+            <div className="input-wrapper">
               <textarea
                 rows={1}
                 placeholder="用 DeepAgents 创造无限可能"
@@ -2468,12 +2474,12 @@ function App() {
                 }}
                 onKeyDown={handleKeyDown}
               />
-              <div class="input-footer">
-                <div class="input-actions-left">
-                  <button type="button" class="input-action-btn" title="添加">
+              <div className="input-footer">
+                <div className="input-actions-left">
+                  <button type="button" className="input-action-btn" title="添加">
                     <Icons.Plus />
                   </button>
-                  <button type="button" class="input-action-btn" title="提及">
+                  <button type="button" className="input-action-btn" title="提及">
                     <Icons.User />
                   </button>
                   <MemoryProgressRing
@@ -2482,26 +2488,26 @@ function App() {
                     title={`记忆字数 ${memoryStats.chars}/${memoryStats.limit}`}
                   />
                 </div>
-                <div class="input-actions-right">
-                  <button type="button" class="input-action-btn" title="语音">
+                <div className="input-actions-right">
+                  <button type="button" className="input-action-btn" title="语音">
                     <Icons.Mic />
                   </button>
-                  <button class="send-btn" onClick={sendMessage} disabled={!input.trim()}>
+                  <button className="send-btn" onClick={sendMessage} disabled={!input.trim()}>
                     <Icons.Send />
                   </button>
                 </div>
               </div>
             </div>
-            <div class="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>
+            <div className="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>
           </div>
         </main>
 
         {/* Right Sidebar: Agents/Studio */}
-        <aside class="sidebar right-sidebar">
+        <aside className="sidebar right-sidebar">
           {isRightCollapsed ? (
-            <div class="sidebar-rail sidebar-rail-right">
+            <div className="sidebar-rail sidebar-rail-right">
               <button
-                class="sidebar-collapse-icon-btn"
+                className="sidebar-collapse-icon-btn"
                 onClick={() => setIsRightCollapsed(false)}
                 aria-label="展开 Studio"
                 type="button"
@@ -2510,12 +2516,12 @@ function App() {
               </button>
             </div>
           ) : (
-            <div class="sidebar-card studio-card">
-              <div class="sidebar-header">
+            <div className="sidebar-card studio-card">
+              <div className="sidebar-header">
                 <h2>Studio</h2>
-                <div class="sidebar-header-actions">
+                <div className="sidebar-header-actions">
                   <button
-                    class="sidebar-collapse-icon-btn"
+                    className="sidebar-collapse-icon-btn"
                     onClick={() => setIsRightCollapsed(true)}
                     aria-label="折叠 Studio"
                     type="button"
@@ -2619,13 +2625,13 @@ function App() {
                 ))}
               </div>
 
-              <div class="saved-notes-section">
-                <div class="section-title">运行历史</div>
-                <div class="note-list">
+              <div className="saved-notes-section">
+                <div className="section-title">运行历史</div>
+                <div className="note-list">
                   {podcastRuns.map((r) => (
                     <div
                       key={r.run_id}
-                      class="note-item"
+                      className="note-item"
                       onClick={() => void openPodcastRunDetail(r.run_id)}
                       style={{
                         cursor: "pointer",
@@ -2640,12 +2646,12 @@ function App() {
                         return (
                           <>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                              <div class="note-icon"><Icons.Sound /></div>
-                              <div class="note-content">
-                                <div class="note-title" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <div className="note-icon"><Icons.Sound /></div>
+                              <div className="note-content">
+                                <div className="note-title" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                   {r.episode_name}
                                 </div>
-                                <div class="note-meta">{r.created_at} • {r.status}</div>
+                                <div className="note-meta">{r.created_at} • {r.status}</div>
                               </div>
                             </div>
                             <button
@@ -2688,15 +2694,15 @@ function App() {
       </div>
 
       {podcastConfigOpen && (
-        <div class="add-source-backdrop" onClick={() => setPodcastConfigOpen(false)}>
-          <div class="podcast-config-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="add-source-top">
-              <div class="add-source-title">
+        <div className="add-source-backdrop" onClick={() => setPodcastConfigOpen(false)}>
+          <div className="podcast-config-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-source-top">
+              <div className="add-source-title">
                 播客配置
               </div>
-              <div class="podcast-config-top-actions">
+              <div className="podcast-config-top-actions">
                 <button
-                  class="podcast-config-icon-btn"
+                  className="podcast-config-icon-btn"
                   type="button"
                   title="配置管理"
                   onClick={() => setPodcastSettingsOpen(true)}
@@ -2704,7 +2710,7 @@ function App() {
                   <Icons.Settings />
                 </button>
                 <button
-                  class="podcast-config-icon-btn"
+                  className="podcast-config-icon-btn"
                   type="button"
                   title="关闭"
                   onClick={() => setPodcastConfigOpen(false)}
@@ -2714,11 +2720,11 @@ function App() {
               </div>
             </div>
 
-            <div class="podcast-config-body">
-              <div class="podcast-config-row">
-                <div class="ref-section-title">发言人</div>
+            <div className="podcast-config-body">
+              <div className="podcast-config-row">
+                <div className="ref-section-title">发言人</div>
                 <select
-                  class="podcast-config-select"
+                  className="podcast-config-select"
                   value={podcastSelectedSpeaker}
                   onChange={(e) => setPodcastSelectedSpeaker(e.currentTarget.value)}
                 >
@@ -2729,10 +2735,10 @@ function App() {
                 </select>
               </div>
 
-              <div class="podcast-config-row">
-                <div class="ref-section-title">节目配置</div>
+              <div className="podcast-config-row">
+                <div className="ref-section-title">节目配置</div>
                 <select
-                  class="podcast-config-select"
+                  className="podcast-config-select"
                   value={podcastSelectedEpisode}
                   onChange={(e) => setPodcastSelectedEpisode(e.currentTarget.value)}
                 >
@@ -2743,44 +2749,44 @@ function App() {
                 </select>
               </div>
 
-              <div class="podcast-config-row">
-                <div class="ref-section-title">播客标题</div>
+              <div className="podcast-config-row">
+                <div className="ref-section-title">播客标题</div>
                 <input
-                  class="podcast-config-input"
+                  className="podcast-config-input"
                   value={podcastEpisodeName}
                   onInput={(e) => setPodcastEpisodeName((e.target as HTMLInputElement).value)}
                   placeholder="请输入播客标题"
                 />
               </div>
 
-              <div class="podcast-config-row">
-                <div class="ref-section-title">补充指令</div>
+              <div className="podcast-config-row">
+                <div className="ref-section-title">补充指令</div>
                 <textarea
-                  class="podcast-config-textarea"
+                  className="podcast-config-textarea"
                   value={podcastBriefingSuffix}
                   onInput={(e) => setPodcastBriefingSuffix((e.target as HTMLTextAreaElement).value)}
                   placeholder="可选：补充生成要求"
                 />
               </div>
 
-              <div class="podcast-config-row">
-                <div class="ref-section-title">数据源</div>
+              <div className="podcast-config-row">
+                <div className="ref-section-title">数据源</div>
                 <button
-                  class="podcast-source-select-btn"
+                  className="podcast-source-select-btn"
                   type="button"
                   onClick={() => setPodcastSourceSelectOpen(true)}
                 >
                   <span>选择数据源</span>
-                  <span class="podcast-source-count">已选 {podcastSelectedSourceIds.size}/{podcastSources.length}</span>
+                  <span className="podcast-source-count">已选 {podcastSelectedSourceIds.size}/{podcastSources.length}</span>
                 </button>
               </div>
 
-              <div class="podcast-config-actions">
-                <button class="add-source-action" type="button" onClick={() => setPodcastConfigOpen(false)}>
+              <div className="podcast-config-actions">
+                <button className="add-source-action" type="button" onClick={() => setPodcastConfigOpen(false)}>
                   取消
                 </button>
                 <button
-                  class="add-source-action primary"
+                  className="add-source-action primary"
                   type="button"
                   onClick={() => {
                     setPodcastConfigOpen(false);
@@ -2796,50 +2802,50 @@ function App() {
       )}
 
       {podcastSourceSelectOpen && (
-        <div class="add-source-backdrop" onClick={() => setPodcastSourceSelectOpen(false)}>
-          <div class="podcast-source-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="add-source-top">
-              <div class="add-source-title">
+        <div className="add-source-backdrop" onClick={() => setPodcastSourceSelectOpen(false)}>
+          <div className="podcast-source-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-source-top">
+              <div className="add-source-title">
                 选择数据源
-                <div class="add-source-subtitle">选择用于生成播客的素材</div>
+                <div className="add-source-subtitle">选择用于生成播客的素材</div>
               </div>
-              <button class="add-source-close" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
+              <button className="add-source-close" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
                 ×
               </button>
             </div>
-            <div class="podcast-source-modal-body">
-              <label class="podcast-source-all">
+            <div className="podcast-source-modal-body">
+              <label className="podcast-source-all">
                 <input
                   type="checkbox"
                   checked={podcastSources.length > 0 && podcastSelectedSourceIds.size === podcastSources.length}
                   onChange={(e) => setAllPodcastSources((e.target as HTMLInputElement).checked)}
                 />
-                <span class="podcast-source-all-text">选择所有来源</span>
-                <span class="podcast-source-all-meta">
+                <span className="podcast-source-all-text">选择所有来源</span>
+                <span className="podcast-source-all-meta">
                   已选 {podcastSelectedSourceIds.size}/{podcastSources.length}
                 </span>
               </label>
 
-              <div class="podcast-source-list">
+              <div className="podcast-source-list">
                 {podcastSourcesLoading ? (
-                  <div class="ref-muted" style={{ padding: "8px 2px" }}>加载中...</div>
+                  <div className="ref-muted" style={{ padding: "8px 2px" }}>加载中...</div>
                 ) : (
-                  <div class="podcast-source-items">
+                  <div className="podcast-source-items">
                     {podcastSources.map((s) => {
                       const checked = podcastSelectedSourceIds.has(s.id);
                       return (
                         <div
                           key={s.id}
-                          class={`podcast-source-row ${checked ? "selected" : ""}`}
+                          className={`podcast-source-row ${checked ? "selected" : ""}`}
                           onClick={() => togglePodcastSource(s.id)}
                           role="button"
                           tabIndex={0}
                         >
-                          <div class="podcast-source-left">
-                            <div class="podcast-source-icon"><Icons.Pdf /></div>
-                            <div class="podcast-source-name" title={s.filename}>{s.filename}</div>
+                          <div className="podcast-source-left">
+                            <div className="podcast-source-icon"><Icons.Pdf /></div>
+                            <div className="podcast-source-name" title={s.filename}>{s.filename}</div>
                           </div>
-                          <div class="podcast-source-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="podcast-source-right" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={checked}
@@ -2853,8 +2859,8 @@ function App() {
                 )}
               </div>
             </div>
-            <div class="podcast-source-modal-actions">
-              <button class="add-source-action primary" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
+            <div className="podcast-source-modal-actions">
+              <button className="add-source-action primary" type="button" onClick={() => setPodcastSourceSelectOpen(false)}>
                 确定
               </button>
             </div>
@@ -2863,28 +2869,28 @@ function App() {
       )}
 
       {podcastRunDetailOpen && (
-        <div class="ref-modal-backdrop" onClick={() => setPodcastRunDetailOpen(false)}>
-          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="ref-modal-header">
-              <div class="ref-modal-title">运行历史详情</div>
-              <button class="ref-modal-close" onClick={() => setPodcastRunDetailOpen(false)} type="button">
+        <div className="ref-modal-backdrop" onClick={() => setPodcastRunDetailOpen(false)}>
+          <div className="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ref-modal-header">
+              <div className="ref-modal-title">运行历史详情</div>
+              <button className="ref-modal-close" onClick={() => setPodcastRunDetailOpen(false)} type="button">
                 ×
               </button>
             </div>
-            <div class="ref-modal-body">
+            <div className="ref-modal-body">
               {podcastRunDetailLoading ? (
-                <div class="ref-muted">加载中...</div>
+                <div className="ref-muted">加载中...</div>
               ) : podcastRunDetail ? (
                 <div>
-                  <div class="ref-source">{podcastRunDetail.run.episode_name}</div>
-                  <div class="ref-muted" style={{ marginTop: 8 }}>
+                  <div className="ref-source">{podcastRunDetail.run.episode_name}</div>
+                  <div className="ref-muted" style={{ marginTop: 8 }}>
                     {podcastRunDetail.run.status} • {podcastRunDetail.run.created_at}
                   </div>
                   {podcastRunDetail.run.message && (
-                    <div class="ref-muted" style={{ marginTop: 8 }}>{podcastRunDetail.run.message}</div>
+                    <div className="ref-muted" style={{ marginTop: 8 }}>{podcastRunDetail.run.message}</div>
                   )}
-                  <div class="ref-divider" />
-                  <div class="ref-section-title">音频</div>
+                  <div className="ref-divider" />
+                  <div className="ref-section-title">音频</div>
                   {podcastRunDetail.result?.audio_file_path ? (
                     <div style={{ marginTop: 8 }}>
                       <audio
@@ -2893,7 +2899,7 @@ function App() {
                         src={`/api/podcast/runs/${encodeURIComponent(podcastRunDetail.run.run_id)}/audio`}
                         style={{ width: "100%" }}
                       />
-                      <div class="ref-muted" style={{ marginTop: 8 }}>
+                      <div className="ref-muted" style={{ marginTop: 8 }}>
                         <a
                           href={`/api/podcast/runs/${encodeURIComponent(podcastRunDetail.run.run_id)}/audio`}
                           target="_blank"
@@ -2904,24 +2910,24 @@ function App() {
                       </div>
                     </div>
                   ) : (
-                    <div class="ref-muted">暂无音频（可能仍在生成中）</div>
+                    <div className="ref-muted">暂无音频（可能仍在生成中）</div>
                   )}
-                  <div class="ref-divider" />
-                  <div class="ref-section-title">对话内容</div>
+                  <div className="ref-divider" />
+                  <div className="ref-section-title">对话内容</div>
                   {podcastRunDetail.result ? (
                     (() => {
                       const items = extractPodcastTranscript(podcastRunDetail.result.transcript);
                       if (!items.length) {
-                        return <div class="ref-muted">暂无对话内容</div>;
+                        return <div className="ref-muted">暂无对话内容</div>;
                       }
                       return (
-                        <div class="podcast-transcript">
+                        <div className="podcast-transcript">
                           {items.map((it, idx) => (
-                            <div key={`${idx}-${it.speaker}`} class="podcast-transcript-item">
-                              <div class="podcast-transcript-speaker" title={it.speaker || ""}>
+                            <div key={`${idx}-${it.speaker}`} className="podcast-transcript-item">
+                              <div className="podcast-transcript-speaker" title={it.speaker || ""}>
                                 {it.speaker}
                               </div>
-                              <div class="podcast-transcript-bubble">
+                              <div className="podcast-transcript-bubble">
                                 {it.dialogue}
                               </div>
                             </div>
@@ -2930,7 +2936,7 @@ function App() {
                       );
                     })()
                   ) : (
-                    <div class="ref-muted">暂无结果（可能仍在生成中）</div>
+                    <div className="ref-muted">暂无结果（可能仍在生成中）</div>
                   )}
 
                   {podcastRunDetail.result && (
@@ -2943,7 +2949,7 @@ function App() {
                   )}
                 </div>
               ) : (
-                <div class="ref-muted">暂无数据</div>
+                <div className="ref-muted">暂无数据</div>
               )}
             </div>
           </div>
@@ -2951,18 +2957,18 @@ function App() {
       )}
 
       {podcastSettingsOpen && (
-        <div class="add-source-backdrop" onClick={() => {
+        <div className="add-source-backdrop" onClick={() => {
           setPodcastSettingsOpen(false);
           setEditingSpeakerProfile(null);
           setEditingEpisodeProfile(null);
           setIsCreatingProfile(false);
         }}>
-          <div class="podcast-settings-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="add-source-top">
-              <div class="add-source-title">
+          <div className="podcast-settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-source-top">
+              <div className="add-source-title">
                 配置管理
               </div>
-              <button class="add-source-close" type="button" onClick={() => {
+              <button className="add-source-close" type="button" onClick={() => {
                 setPodcastSettingsOpen(false);
                 setEditingSpeakerProfile(null);
                 setEditingEpisodeProfile(null);
@@ -2972,9 +2978,9 @@ function App() {
               </button>
             </div>
 
-            <div class="podcast-settings-tabs">
+            <div className="podcast-settings-tabs">
               <button
-                class={`podcast-settings-tab ${podcastSettingsTab === "speaker" ? "active" : ""}`}
+                className={`podcast-settings-tab ${podcastSettingsTab === "speaker" ? "active" : ""}`}
                 onClick={() => {
                   setPodcastSettingsTab("speaker");
                   setEditingSpeakerProfile(null);
@@ -2985,7 +2991,7 @@ function App() {
                 说话人配置
               </button>
               <button
-                class={`podcast-settings-tab ${podcastSettingsTab === "episode" ? "active" : ""}`}
+                className={`podcast-settings-tab ${podcastSettingsTab === "episode" ? "active" : ""}`}
                 onClick={() => {
                   setPodcastSettingsTab("episode");
                   setEditingSpeakerProfile(null);
@@ -2997,20 +3003,20 @@ function App() {
               </button>
             </div>
 
-            <div class="podcast-settings-body">
+            <div className="podcast-settings-body">
               {podcastSettingsTab === "speaker" && !editingSpeakerProfile && (
-                <div class="podcast-profile-list">
+                <div className="podcast-profile-list">
                   {podcastSpeakerProfiles.map((p) => (
-                    <div key={p.id} class={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
-                      <div class="podcast-profile-info">
-                        <div class="podcast-profile-name">{p.name}</div>
-                        <div class="podcast-profile-meta">
+                    <div key={p.id} className={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
+                      <div className="podcast-profile-info">
+                        <div className="podcast-profile-name">{p.name}</div>
+                        <div className="podcast-profile-meta">
                           {p.tts_provider} • {p.speakers?.length || 0} 位说话人
                         </div>
                       </div>
-                      <div class="podcast-profile-actions">
+                      <div className="podcast-profile-actions">
                         <button
-                          class="podcast-profile-icon-btn"
+                          className="podcast-profile-icon-btn"
                           title="编辑"
                           onClick={() => {
                             setEditingSpeakerProfile(p);
@@ -3020,7 +3026,7 @@ function App() {
                           <Icons.Settings />
                         </button>
                         <button
-                          class="podcast-profile-icon-btn"
+                          className="podcast-profile-icon-btn"
                           title="删除"
                           onClick={() => {
                             setDeletingProfileId(p.id);
@@ -3033,7 +3039,7 @@ function App() {
                     </div>
                   ))}
                   <button
-                    class="podcast-add-btn"
+                    className="podcast-add-btn"
                     onClick={() => {
                       setEditingSpeakerProfile({
                         id: "",
@@ -3070,18 +3076,18 @@ function App() {
               )}
 
               {podcastSettingsTab === "episode" && !editingEpisodeProfile && (
-                <div class="podcast-profile-list">
+                <div className="podcast-profile-list">
                   {podcastEpisodeProfiles.map((p) => (
-                    <div key={p.id} class={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
-                      <div class="podcast-profile-info">
-                        <div class="podcast-profile-name">{p.name}</div>
-                        <div class="podcast-profile-meta">
+                    <div key={p.id} className={`podcast-profile-item ${deletingProfileId === p.id ? "deleting" : ""}`}>
+                      <div className="podcast-profile-info">
+                        <div className="podcast-profile-name">{p.name}</div>
+                        <div className="podcast-profile-meta">
                           {p.outline_model} • {p.num_segments} 段落
                         </div>
                       </div>
-                      <div class="podcast-profile-actions">
+                      <div className="podcast-profile-actions">
                         <button
-                          class="podcast-profile-icon-btn"
+                          className="podcast-profile-icon-btn"
                           title="编辑"
                           onClick={() => {
                             setEditingEpisodeProfile(p);
@@ -3091,7 +3097,7 @@ function App() {
                           <Icons.Settings />
                         </button>
                         <button
-                          class="podcast-profile-icon-btn"
+                          className="podcast-profile-icon-btn"
                           title="删除"
                           onClick={() => {
                             setDeletingProfileId(p.id);
@@ -3104,7 +3110,7 @@ function App() {
                     </div>
                   ))}
                   <button
-                    class="podcast-add-btn"
+                    className="podcast-add-btn"
                     onClick={() => {
                       setEditingEpisodeProfile({
                         id: "",
@@ -3150,21 +3156,21 @@ function App() {
       )}
 
       {deletingProfileId && (
-        <div class="add-source-backdrop" onClick={() => {
+        <div className="add-source-backdrop" onClick={() => {
           setDeletingProfileId(null);
           setDeletingProfileType(null);
         }}>
-          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="source-action-title">删除配置</div>
-            <div class="source-action-desc">确认删除该配置吗？删除后不可恢复。</div>
-            <div class="source-action-actions">
-              <button class="source-action-btn" type="button" onClick={() => {
+          <div className="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="source-action-title">删除配置</div>
+            <div className="source-action-desc">确认删除该配置吗？删除后不可恢复。</div>
+            <div className="source-action-actions">
+              <button className="source-action-btn" type="button" onClick={() => {
                 setDeletingProfileId(null);
                 setDeletingProfileType(null);
               }}>
                 取消
               </button>
-              <button class="source-action-btn danger" type="button" onClick={async () => {
+              <button className="source-action-btn danger" type="button" onClick={async () => {
                 if (deletingProfileType === "speaker") {
                   await deleteSpeakerProfile(deletingProfileId);
                 } else if (deletingProfileType === "episode") {
@@ -3181,32 +3187,32 @@ function App() {
       )}
 
       {refModalOpen && (
-        <div class="ref-modal-backdrop" onClick={() => setRefModalOpen(false)}>
-          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="ref-modal-header">
-              <div class="ref-modal-title">
+        <div className="ref-modal-backdrop" onClick={() => setRefModalOpen(false)}>
+          <div className="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ref-modal-header">
+              <div className="ref-modal-title">
                 引用 [{refModalIndex}]
               </div>
-              <button class="ref-modal-close" onClick={() => setRefModalOpen(false)} type="button">
+              <button className="ref-modal-close" onClick={() => setRefModalOpen(false)} type="button">
                 ×
               </button>
             </div>
-            <div class="ref-modal-body">
+            <div className="ref-modal-body">
               {(() => {
                 const r = (refModalRefs || []).find((x) => x.index === refModalIndex);
                 if (!r) {
-                  return <div class="ref-muted">没有找到引用内容</div>;
+                  return <div className="ref-muted">没有找到引用内容</div>;
                 }
                 return (
                   <div>
-                    <div class="ref-source">{r.source ? r.source.split("/").pop() : "unknown"}</div>
-                    {r.text && <pre class="ref-snippet">{r.text}</pre>}
-                    <div class="ref-divider" />
-                    <div class="ref-section-title">原文片段</div>
+                    <div className="ref-source">{r.source ? r.source.split("/").pop() : "unknown"}</div>
+                    {r.text && <pre className="ref-snippet">{r.text}</pre>}
+                    <div className="ref-divider" />
+                    <div className="ref-section-title">原文片段</div>
                     {refModalFileLoading ? (
-                      <div class="ref-muted">加载中...</div>
+                      <div className="ref-muted">加载中...</div>
                     ) : (
-                      <pre class="ref-file">{refModalFileContent || ""}</pre>
+                      <pre className="ref-file">{refModalFileContent || ""}</pre>
                     )}
                   </div>
                 );
@@ -3217,9 +3223,9 @@ function App() {
       )}
 
       {writeDetailOpen && (
-        <div class="ref-modal-backdrop" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }}>
+        <div className="ref-modal-backdrop" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }}>
           <div
-            class={writeDetailFullscreen ? "ref-modal ref-modal-fullscreen" : "ref-modal"}
+            className={writeDetailFullscreen ? "ref-modal ref-modal-fullscreen" : "ref-modal"}
             onClick={(e) => e.stopPropagation()}
             style={writeDetailFullscreen ? {
               width: "100vw",
@@ -3228,36 +3234,36 @@ function App() {
               margin: 0
             } : undefined}
           >
-            <div class="ref-modal-header">
-              <div class="ref-modal-title">
+            <div className="ref-modal-header">
+              <div className="ref-modal-title">
                 {writeDetail?.title || "文档详情"}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <button
-                  class="ref-modal-close"
+                  className="ref-modal-close"
                   onClick={() => setWriteDetailFullscreen(!writeDetailFullscreen)}
                   type="button"
                   title={writeDetailFullscreen ? "退出全屏" : "全屏查看"}
                 >
                   {writeDetailFullscreen ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
                     </svg>
                   ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                     </svg>
                   )}
                 </button>
-                <button class="ref-modal-close" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }} type="button">
+                <button className="ref-modal-close" onClick={() => { setWriteDetailOpen(false); setWriteDetailFullscreen(false); }} type="button">
                   ×
                 </button>
               </div>
             </div>
-            <div class="ref-modal-body" style={writeDetailFullscreen ? { height: "calc(100vh - 56px)" } : undefined}>
+            <div className="ref-modal-body" style={writeDetailFullscreen ? { height: "calc(100vh - 56px)" } : undefined}>
               {writeDetail ? (
                 <div>
-                  <div class="ref-section-title">文档内容</div>
+                  <div className="ref-section-title">文档内容</div>
                   <div style={{ maxHeight: "calc(100vh - 150px)", overflow: "auto" }}>
                     {(() => {
                       const fileType = writeDetail.file_type?.toLowerCase() || "";
@@ -3266,7 +3272,7 @@ function App() {
                       // PDF 文件：使用 embed 标签渲染
                       if (fileType === "pdf") {
                         if (!binaryData) {
-                          return <div class="ref-muted">PDF 内容为空</div>;
+                          return <div className="ref-muted">PDF 内容为空</div>;
                         }
                         const pdfDataUrl = `data:application/pdf;base64,${binaryData}`;
                         return (
@@ -3280,7 +3286,7 @@ function App() {
                       // 图片文件：使用 img 标签渲染
                       if (["png", "jpg", "jpeg", "gif", "webp"].includes(fileType)) {
                         if (!binaryData) {
-                          return <div class="ref-muted">图片内容为空</div>;
+                          return <div className="ref-muted">图片内容为空</div>;
                         }
                         const mimeType = fileType === "jpg" ? "jpeg" : fileType;
                         const imgDataUrl = `data:image/${mimeType};base64,${binaryData}`;
@@ -3323,7 +3329,7 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div class="ref-muted">加载中...</div>
+                <div className="ref-muted">加载中...</div>
               )}
             </div>
           </div>
@@ -3341,26 +3347,26 @@ function App() {
       />
 
       {addSourceOpen && (
-        <div class="add-source-backdrop" onClick={closeAddSource}>
-          <div class="add-source-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="add-source-top">
-              <div class="add-source-title">
+        <div className="add-source-backdrop" onClick={closeAddSource}>
+          <div className="add-source-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-source-top">
+              <div className="add-source-title">
                 根据以下内容生成音频概览和视频概览
-                <div class="add-source-subtitle">您的笔记</div>
+                <div className="add-source-subtitle">您的笔记</div>
               </div>
-              <button class="add-source-close" type="button" onClick={closeAddSource}>
+              <button className="add-source-close" type="button" onClick={closeAddSource}>
                 ×
               </button>
             </div>
 
-            <div class="add-source-search">
-              <div class="add-source-search-box">
-                <div class="add-source-search-row">
-                  <div class="add-source-search-icon">
+            <div className="add-source-search">
+              <div className="add-source-search-box">
+                <div className="add-source-search-row">
+                  <div className="add-source-search-icon">
                     <Icons.Search />
                   </div>
                   <input
-                    class="add-source-search-input"
+                    className="add-source-search-input"
                     placeholder="在网络中搜索新来源"
                     value={urlDraft}
                     onInput={(e) => {
@@ -3372,46 +3378,46 @@ function App() {
                   />
                 </div>
 
-                <div class="add-source-search-controls">
+                <div className="add-source-search-controls">
                   <button
-                    class={`add-source-chip ${urlMode === "crawl" ? "active" : ""}`}
+                    className={`add-source-chip ${urlMode === "crawl" ? "active" : ""}`}
                     type="button"
                     aria-pressed={urlMode === "crawl"}
                     onClick={() => setUrlMode("crawl")}
                   >
-                    <span class="chip-icon"><Icons.Globe /></span>
-                    <span class="chip-text">Web</span>
-                    <span class="chip-caret"><Icons.ChevronDown /></span>
+                    <span className="chip-icon"><Icons.Globe /></span>
+                    <span className="chip-text">Web</span>
+                    <span className="chip-caret"><Icons.ChevronDown /></span>
                   </button>
                   <button
-                    class={`add-source-chip ${urlMode === "llm_summary" ? "active" : ""}`}
+                    className={`add-source-chip ${urlMode === "llm_summary" ? "active" : ""}`}
                     type="button"
                     aria-pressed={urlMode === "llm_summary"}
                     onClick={() => setUrlMode("llm_summary")}
                   >
-                    <span class="chip-icon"><Icons.Bolt /></span>
-                    <span class="chip-text">Fast Research</span>
-                    <span class="chip-caret"><Icons.ChevronDown /></span>
+                    <span className="chip-icon"><Icons.Bolt /></span>
+                    <span className="chip-text">Fast Research</span>
+                    <span className="chip-caret"><Icons.ChevronDown /></span>
                   </button>
                 </div>
 
-                <button class="add-source-go" type="button" onClick={parseUrlToPreview}>
+                <button className="add-source-go" type="button" onClick={parseUrlToPreview}>
                   <Icons.ArrowRight />
                 </button>
               </div>
 
               {urlParseState.status === "parsing" && (
-                <div class="add-source-selected">正在解析...</div>
+                <div className="add-source-selected">正在解析...</div>
               )}
               {urlParseState.status === "error" && (
-                <div class="add-source-selected">解析失败：{urlParseState.message}</div>
+                <div className="add-source-selected">解析失败：{urlParseState.message}</div>
               )}
               {urlParseState.status === "ready" && (
                 <div style={{ marginTop: 12 }}>
-                  <div class="ref-section-title">解析预览</div>
-                  <pre class="ref-file" style={{ maxHeight: 240, overflow: "auto" }}>{urlParseState.content}</pre>
+                  <div className="ref-section-title">解析预览</div>
+                  <pre className="ref-file" style={{ maxHeight: 240, overflow: "auto" }}>{urlParseState.content}</pre>
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                    <button class="add-source-action primary" type="button" onClick={uploadParsedUrl}>
+                    <button className="add-source-action primary" type="button" onClick={uploadParsedUrl}>
                       上传
                     </button>
                   </div>
@@ -3419,33 +3425,33 @@ function App() {
               )}
             </div>
 
-            <div class="add-source-drop">
-              <div class="add-source-drop-title">或将文件拖至此处</div>
-              <div class="add-source-actions">
-                <button class="add-source-action" type="button" onClick={chooseUploadFiles}>
-                  <span class="chip-icon"><Icons.Upload /></span>
+            <div className="add-source-drop">
+              <div className="add-source-drop-title">或将文件拖至此处</div>
+              <div className="add-source-actions">
+                <button className="add-source-action" type="button" onClick={chooseUploadFiles}>
+                  <span className="chip-icon"><Icons.Upload /></span>
                   上传文件
                 </button>
-                <button class="add-source-action" type="button">
-                  <span class="chip-icon"><Icons.Link /></span>
+                <button className="add-source-action" type="button">
+                  <span className="chip-icon"><Icons.Link /></span>
                   网站
                 </button>
-                <button class="add-source-action" type="button">
-                  <span class="chip-icon"><Icons.Drive /></span>
+                <button className="add-source-action" type="button">
+                  <span className="chip-icon"><Icons.Drive /></span>
                   云端硬盘
                 </button>
-                <button class="add-source-action" type="button">
-                  <span class="chip-icon"><Icons.Copy /></span>
+                <button className="add-source-action" type="button">
+                  <span className="chip-icon"><Icons.Copy /></span>
                   复制的文字
                 </button>
               </div>
 
               {pendingUploadFiles.length > 0 ? (
-                <div class="add-source-selected">
+                <div className="add-source-selected">
                   已选择 {pendingUploadFiles.length} 个文件。
                   <span style={{ marginLeft: 8 }}>
                     <button
-                      class="add-source-action primary"
+                      className="add-source-action primary"
                       type="button"
                       onClick={uploadPendingFiles}
                       disabled={uploadState.status === "uploading"}
@@ -3455,7 +3461,7 @@ function App() {
                   </span>
                 </div>
               ) : (
-                <div class="add-source-selected muted">未选择文件</div>
+                <div className="add-source-selected muted">未选择文件</div>
               )}
             </div>
           </div>
@@ -3463,29 +3469,29 @@ function App() {
       )}
 
       {sourceDetailOpen && (
-        <div class="ref-modal-backdrop" onClick={() => setSourceDetailOpen(false)}>
-          <div class="ref-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="ref-modal-header">
-              <div class="ref-modal-title">来源详情</div>
-              <button class="ref-modal-close" onClick={() => setSourceDetailOpen(false)} type="button">
+        <div className="ref-modal-backdrop" onClick={() => setSourceDetailOpen(false)}>
+          <div className="ref-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ref-modal-header">
+              <div className="ref-modal-title">来源详情</div>
+              <button className="ref-modal-close" onClick={() => setSourceDetailOpen(false)} type="button">
                 ×
               </button>
             </div>
-            <div class="ref-modal-body">
+            <div className="ref-modal-body">
               {sourceDetailLoading ? (
-                <div class="ref-muted">加载中...</div>
+                <div className="ref-muted">加载中...</div>
               ) : sourceDetail ? (
                 <div>
-                  <div class="ref-source">{sourceDetail.filename}</div>
-                  <div class="ref-muted" style={{ marginTop: 8 }}>
+                  <div className="ref-source">{sourceDetail.filename}</div>
+                  <div className="ref-muted" style={{ marginTop: 8 }}>
                     {sourceDetail.rel_path || sourceDetail.filename}
                   </div>
-                  <div class="ref-divider" />
-                  <div class="ref-section-title">内容预览</div>
-                  <pre class="ref-file">{sourceDetail.content_preview || "(二进制文件或暂无可预览文本)"}</pre>
+                  <div className="ref-divider" />
+                  <div className="ref-section-title">内容预览</div>
+                  <pre className="ref-file">{sourceDetail.content_preview || "(二进制文件或暂无可预览文本)"}</pre>
                 </div>
               ) : (
-                <div class="ref-muted">暂无详情</div>
+                <div className="ref-muted">暂无详情</div>
               )}
             </div>
           </div>
@@ -3493,20 +3499,20 @@ function App() {
       )}
 
       {renameSourceOpen && (
-        <div class="add-source-backdrop" onClick={() => setRenameSourceOpen(false)}>
-          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="source-action-title">重命名</div>
+        <div className="add-source-backdrop" onClick={() => setRenameSourceOpen(false)}>
+          <div className="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="source-action-title">重命名</div>
             <input
-              class="source-action-input"
+              className="source-action-input"
               value={renameSourceDraft}
               onInput={(e) => setRenameSourceDraft((e.target as HTMLInputElement).value)}
               placeholder="请输入新的名称"
             />
-            <div class="source-action-actions">
-              <button class="source-action-btn" type="button" onClick={() => setRenameSourceOpen(false)}>
+            <div className="source-action-actions">
+              <button className="source-action-btn" type="button" onClick={() => setRenameSourceOpen(false)}>
                 取消
               </button>
-              <button class="source-action-btn primary" type="button" onClick={() => void confirmRenameSource()}>
+              <button className="source-action-btn primary" type="button" onClick={() => void confirmRenameSource()}>
                 确定
               </button>
             </div>
@@ -3515,15 +3521,15 @@ function App() {
       )}
 
       {deleteSourceId && (
-        <div class="add-source-backdrop" onClick={() => setDeleteSourceId(null)}>
-          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="source-action-title">删除来源</div>
-            <div class="source-action-desc">确认删除该来源吗？删除后不可恢复。</div>
-            <div class="source-action-actions">
-              <button class="source-action-btn" type="button" onClick={() => setDeleteSourceId(null)}>
+        <div className="add-source-backdrop" onClick={() => setDeleteSourceId(null)}>
+          <div className="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="source-action-title">删除来源</div>
+            <div className="source-action-desc">确认删除该来源吗？删除后不可恢复。</div>
+            <div className="source-action-actions">
+              <button className="source-action-btn" type="button" onClick={() => setDeleteSourceId(null)}>
                 取消
               </button>
-              <button class="source-action-btn danger" type="button" onClick={() => void confirmDeleteSource()}>
+              <button className="source-action-btn danger" type="button" onClick={() => void confirmDeleteSource()}>
                 删除
               </button>
             </div>
@@ -3532,22 +3538,22 @@ function App() {
       )}
 
       {createFolderOpen && (
-        <div class="add-source-backdrop" onClick={() => setCreateFolderOpen(false)}>
-          <div class="source-action-modal" onClick={(e) => e.stopPropagation()}>
-            <div class="source-action-title">创建文件夹</div>
+        <div className="add-source-backdrop" onClick={() => setCreateFolderOpen(false)}>
+          <div className="source-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="source-action-title">创建文件夹</div>
             <input
-              class="source-action-input"
+              className="source-action-input"
               value={newFolderName}
               onInput={(e) => setNewFolderName((e.target as HTMLInputElement).value)}
               placeholder="请输入文件夹名称"
               autoFocus
             />
-            <div class="source-action-actions">
-              <button class="source-action-btn" type="button" onClick={() => setCreateFolderOpen(false)}>
+            <div className="source-action-actions">
+              <button className="source-action-btn" type="button" onClick={() => setCreateFolderOpen(false)}>
                 取消
               </button>
               <button
-                class="source-action-btn primary"
+                className="source-action-btn primary"
                 type="button"
                 onClick={async () => {
                   const name = newFolderName.trim();
@@ -3570,220 +3576,6 @@ function App() {
       )}
     </div>
   );
-}
-
-function AssistantContent({
-  text,
-  isPending,
-  references,
-  onOpenRef,
-}: {
-  text: string;
-  isPending: boolean;
-  references?: RagReference[];
-  onOpenRef: (idx: number) => void;
-}) {
-  if (isPending && !text) {
-    return (
-      <div class="assistant-thinking">
-        <span class="dot" />
-        <span class="dot" />
-        <span class="dot" />
-      </div>
-    );
-  }
-
-  const urlStartIndex = maxRefIndex(references) + 1;
-  const extracted = extractUrlReferences(text, urlStartIndex);
-  const urlRefs = extracted.urlRefs;
-  const processedText = extracted.text;
-
-  const renderInline = (value: string) => {
-    const nodes: Array<ComponentChild> = [];
-    // Regular expression for references [n], bold **text**, and italic *text*
-    const re = /(\[(\d+)\])|(\*\*(.*?)\*\*)|(\*(.*?)\*)/g;
-    let lastIdx = 0;
-    let mm: RegExpExecArray | null;
-
-    while ((mm = re.exec(value)) !== null) {
-      const start = mm.index;
-      const end = start + mm[0].length;
-      
-      if (start > lastIdx) {
-        nodes.push(value.slice(lastIdx, start));
-      }
-
-      if (mm[1]) { // Reference [n]
-        const idx = Number(mm[2]);
-        const ragExists = (references || []).some((r) => r.index === idx);
-        const urlRef = urlRefs.find((r) => r.index === idx);
-        if (ragExists) {
-          nodes.push(
-            <button
-              key={`${start}-${idx}`}
-              type="button"
-              class="ref-chip"
-              onClick={() => onOpenRef(idx)}
-              title="查看引用"
-            >
-              [{idx}]
-            </button>,
-          );
-        } else if (urlRef) {
-          const iconUrl = getFaviconUrl(urlRef.url);
-          nodes.push(
-            <a
-              key={`${start}-${idx}`}
-              class="ref-chip ref-link"
-              href={urlRef.url}
-              target="_blank"
-              rel="noreferrer"
-              title={urlRef.url}
-            >
-              {iconUrl ? <img class="ref-favicon" src={iconUrl} alt="" loading="lazy" /> : null}
-              [{idx}]
-            </a>,
-          );
-        } else {
-          // 无对应 references 数据时，渲染为纯文本而非按钮
-          nodes.push(<span key={`${start}-${idx}`} class="ref-text-only">[{idx}]</span>);
-        }
-      } else if (mm[3]) { // Bold **text**
-        nodes.push(<strong class="md-bold">{mm[4]}</strong>);
-      } else if (mm[5]) { // Italic *text*
-        nodes.push(<em class="md-italic">{mm[6]}</em>);
-      }
-
-      lastIdx = end;
-    }
-
-    if (lastIdx < value.length) {
-      nodes.push(value.slice(lastIdx));
-    }
-    return nodes;
-  };
-
-  const renderMarkdownBlocks = (src: string) => {
-    const lines = src.replace(/\r\n/g, "\n").split("\n");
-    const blocks: ComponentChild[] = [];
-    let i = 0;
-
-    while (i < lines.length) {
-      const line = lines[i];
-      
-      // Code Blocks
-      if (line.trim().startsWith("```")) {
-        const lang = line.trim().slice(3).trim();
-        i += 1;
-        const codeLines: string[] = [];
-        while (i < lines.length && !lines[i].trim().startsWith("```")) {
-          codeLines.push(lines[i]);
-          i += 1;
-        }
-        i += 1;
-        blocks.push(
-          <div class="md-code-block">
-            {lang && <div class="md-code-lang">{lang}</div>}
-            <pre class="md-code" data-lang={lang || undefined}>
-              <code>{codeLines.join("\n")}</code>
-            </pre>
-          </div>
-        );
-        continue;
-      }
-
-      // Headings
-      const heading = /^\s{0,3}(#{1,6})\s+(.*)$/.exec(line);
-      if (heading) {
-        const level = heading[1].length;
-        const content = heading[2] || "";
-        const Tag = (`h${Math.min(level, 6)}` as unknown) as any;
-        blocks.push(<Tag class={`md-heading h${level}`}>{renderInline(content)}</Tag>);
-        i += 1;
-        continue;
-      }
-
-      // Tables
-      if (line.trim().startsWith("|") && i + 1 < lines.length && lines[i+1].trim().includes("|---")) {
-        const rows: string[][] = [];
-        // Header
-        rows.push(line.split("|").filter(s => s.trim()).map(s => s.trim()));
-        i += 2; // Skip header and separator
-        // Rows
-        while (i < lines.length && lines[i].trim().startsWith("|")) {
-          rows.push(lines[i].split("|").filter(s => s.trim()).map(s => s.trim()));
-          i += 1;
-        }
-        blocks.push(
-          <div class="md-table-wrapper">
-            <table class="md-table">
-              <thead>
-                <tr>{rows[0].map(cell => <th>{renderInline(cell)}</th>)}</tr>
-              </thead>
-              <tbody>
-                {rows.slice(1).map(row => (
-                  <tr>{row.map(cell => <td>{renderInline(cell)}</td>)}</tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-        continue;
-      }
-
-      // Bullet Lists
-      const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-      if (bullet) {
-        const items: ComponentChild[] = [];
-        while (i < lines.length) {
-          const m = /^\s*[-*]\s+(.*)$/.exec(lines[i]);
-          if (!m) break;
-          items.push(<li>{renderInline(m[1] || "")}</li>);
-          i += 1;
-        }
-        blocks.push(<ul class="md-ul">{items}</ul>);
-        continue;
-      }
-
-      // Numbered Lists
-      const numbered = /^\s*(\d+)\.\s+(.*)$/.exec(line);
-      if (numbered) {
-        const items: ComponentChild[] = [];
-        while (i < lines.length) {
-          const m = /^\s*(\d+)\.\s+(.*)$/.exec(lines[i]);
-          if (!m) break;
-          items.push(<li>{renderInline(m[2] || "")}</li>);
-          i += 1;
-        }
-        blocks.push(<ol class="md-ol">{items}</ol>);
-        continue;
-      }
-
-      // Empty Lines
-      if (!line.trim()) {
-        i += 1;
-        continue;
-      }
-
-      // Paragraphs
-      const paraLines: string[] = [line];
-      i += 1;
-      while (i < lines.length && lines[i].trim() && 
-             !lines[i].trim().startsWith("```") && 
-             !/^\s{0,3}#{1,6}\s+/.test(lines[i]) && 
-             !/^\s*[-*]\s+/.test(lines[i]) &&
-             !/^\s*\d+\.\s+/.test(lines[i]) &&
-             !lines[i].trim().startsWith("|")) {
-        paraLines.push(lines[i]);
-        i += 1;
-      }
-      blocks.push(<p class="md-p">{renderInline(paraLines.join("\n"))}</p>);
-    }
-
-    return blocks;
-  };
-
-  return <div class="md-root">{renderMarkdownBlocks(processedText)}</div>;
 }
 
 // Collapsible Tool Message Component (Legacy - 保留旧实现作为备份)
@@ -3823,19 +3615,19 @@ function ToolMessageLegacy({
     if (status === "running") {
       if (toolName === "web_search") {
         const query = (args as any)?.query || (args as any)?.q || (args as any)?.value || "";
-        return <div class="ref-muted">正在搜索{query ? `：${query}` : "..."}</div>;
+        return <div className="ref-muted">正在搜索{query ? `：${query}` : "..."}</div>;
       }
       if (toolName === "rag_query") {
         const query = (args as any)?.query || (args as any)?.q || (args as any)?.value || "";
-        return <div class="ref-muted">正在检索{query ? `：${query}` : "..."}</div>;
+        return <div className="ref-muted">正在检索{query ? `：${query}` : "..."}</div>;
       }
       if (toolName === "http_request") {
         const url = (args as any)?.url || (args as any)?.uri || (args as any)?.value || "";
-        return <div class="ref-muted">正在请求{url ? `：${url}` : "..."}</div>;
+        return <div className="ref-muted">正在请求{url ? `：${url}` : "..."}</div>;
       }
       if (toolName === "fetch_url") {
         const url = (args as any)?.url || (args as any)?.uri || (args as any)?.value || "";
-        return <div class="ref-muted">正在抓取{url ? `：${url}` : "..."}</div>;
+        return <div className="ref-muted">正在抓取{url ? `：${url}` : "..."}</div>;
       }
     }
 
@@ -3855,7 +3647,7 @@ function ToolMessageLegacy({
       const results = (data as any).results || [];
       if (results.length > 0) {
         return (
-          <div class="tool-results-list">
+          <div className="tool-results-list">
             {results.map((r: any, idx: number) => {
               // 提取域名
               let domain = '';
@@ -3871,21 +3663,21 @@ function ToolMessageLegacy({
               const scoreColor = scorePercent >= 80 ? '#4caf50' : scorePercent >= 60 ? '#ff9800' : '#9e9e9e';
               
               return (
-                <div key={idx} class="tool-result-item">
-                  <div class="result-header">
-                    <div class="result-title-row">
+                <div key={idx} className="tool-result-item">
+                  <div className="result-header">
+                    <div className="result-title-row">
                       <Icons.Globe />
-                      <span class="result-title-text">{r.title}</span>
+                      <span className="result-title-text">{r.title}</span>
                     </div>
                     {r.score !== undefined && (
-                      <div class="result-score">
-                        <span class="score-value">{scorePercent}%</span>
+                      <div className="result-score">
+                        <span className="score-value">{scorePercent}%</span>
                       </div>
                     )}
                   </div>
-                  <div class="result-content">{r.content}</div>
-                  <div class="result-meta">
-                    <a href={r.url} target="_blank" rel="noreferrer" class="result-link">
+                  <div className="result-content">{r.content}</div>
+                  <div className="result-meta">
+                    <a href={r.url} target="_blank" rel="noreferrer" className="result-link">
                       <Icons.Link />
                       <span>{domain}</span>
                     </a>
@@ -3896,16 +3688,16 @@ function ToolMessageLegacy({
           </div>
         );
       }
-      return <div class="ref-muted">暂无搜索结果</div>;
+      return <div className="ref-muted">暂无搜索结果</div>;
     }
 
     // RAG Query Results Rendering
     if (toolName === "rag_query" && Array.isArray(data)) {
       if (!data.length) {
-        return <div class="ref-muted">暂无检索结果</div>;
+        return <div className="ref-muted">暂无检索结果</div>;
       }
       return (
-        <div class="tool-results-list">
+        <div className="tool-results-list">
           {data.map((r: any, idx: number) => {
             // 评分可视化（0-1 转换为百分比）
             const score = r.score || 0;
@@ -3914,25 +3706,25 @@ function ToolMessageLegacy({
             const relevanceLabel = scorePercent >= 80 ? '高相关' : scorePercent >= 60 ? '中相关' : '低相关';
             
             return (
-              <div key={idx} class="tool-result-item rag-result-item">
-                <div class="result-header">
-                  <div class="rag-index">
+              <div key={idx} className="tool-result-item rag-result-item">
+                <div className="result-header">
+                  <div className="rag-index">
                     <Icons.Search />
                     <span>片段 {r.index || idx + 1}</span>
                   </div>
-                  <div class="rag-relevance" style={{ color: scoreColor }}>
-                    <span class="relevance-label">{relevanceLabel}</span>
-                    <span class="score-value">{scorePercent}%</span>
+                  <div className="rag-relevance" style={{ color: scoreColor }}>
+                    <span className="relevance-label">{relevanceLabel}</span>
+                    <span className="score-value">{scorePercent}%</span>
                   </div>
                 </div>
-                <div class="rag-score-bar">
-                  <div class="score-bar-fill" style={{ width: `${scorePercent}%`, backgroundColor: scoreColor }}></div>
+                <div className="rag-score-bar">
+                  <div className="score-bar-fill" style={{ width: `${scorePercent}%`, backgroundColor: scoreColor }}></div>
                 </div>
-                <div class="result-content rag-content">{r.text}</div>
-                <div class="result-meta rag-source">
+                <div className="result-content rag-content">{r.text}</div>
+                <div className="result-meta rag-source">
                   <Icons.Pdf />
                   <span>{r.source || '未知来源'}</span>
-                  {r.mongo_id && <span class="mongo-id">ID: {r.mongo_id.substring(0, 8)}...</span>}
+                  {r.mongo_id && <span className="mongo-id">ID: {r.mongo_id.substring(0, 8)}...</span>}
                 </div>
               </div>
             );
@@ -3946,12 +3738,12 @@ function ToolMessageLegacy({
       const cmd = (args as any)?.command || (args as any)?.cmd || "";
       const out = typeof data === "string" ? data : formatJson(data);
       return (
-        <div class="tool-shell-box">
-          <div class="tool-shell-cmd">
-            <span class="shell-prompt">$</span> {cmd}
+        <div className="tool-shell-box">
+          <div className="tool-shell-cmd">
+            <span className="shell-prompt">$</span> {cmd}
           </div>
           {status === "done" && out && (
-            <pre class="tool-shell-out">{out}</pre>
+            <pre className="tool-shell-out">{out}</pre>
           )}
         </div>
       );
@@ -3980,29 +3772,29 @@ function ToolMessageLegacy({
         const fileSize = (parsedOutput as any)?.size || 0;
         
         return (
-          <div class="tool-file-box write-file-box">
-            <div class="write-file-header">
-              <div class="write-file-icon">
+          <div className="tool-file-box write-file-box">
+            <div className="write-file-header">
+              <div className="write-file-icon">
                 <Icons.Pdf />
               </div>
-              <div class="write-file-info">
-                <div class="write-file-title">{title}</div>
-                <div class="write-file-meta">
-                  <span class="file-type">{fileType}</span>
-                  <span class="file-separator">·</span>
-                  <span class="file-size">{(fileSize / 1024).toFixed(1)}KB</span>
+              <div className="write-file-info">
+                <div className="write-file-title">{title}</div>
+                <div className="write-file-meta">
+                  <span className="file-type">{fileType}</span>
+                  <span className="file-separator">·</span>
+                  <span className="file-size">{(fileSize / 1024).toFixed(1)}KB</span>
                 </div>
               </div>
             </div>
             
-            <div class="write-file-steps">
-              <div class="step-item completed">
-                <div class="step-icon success">✓</div>
-                <div class="step-text">未知文件</div>
+            <div className="write-file-steps">
+              <div className="step-item completed">
+                <div className="step-icon success">✓</div>
+                <div className="step-text">未知文件</div>
               </div>
-              <div class="step-item completed">
-                <div class="step-icon success">✓</div>
-                <div class="step-text">操作成功</div>
+              <div className="step-item completed">
+                <div className="step-icon success">✓</div>
+                <div className="step-text">操作成功</div>
               </div>
             </div>
           </div>
@@ -4019,31 +3811,31 @@ function ToolMessageLegacy({
       }
       
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
+        <div className="tool-file-box">
+          <div className="tool-file-header">
             <Icons.Pdf /> 
-            <span class="tool-file-path">{displayPath || '未知文件'}</span>
-            {isReadOp && <span class="file-op-badge read-badge">读取</span>}
-            {isWriteOp && <span class="file-op-badge write-badge">写入</span>}
-            {isEditOp && <span class="file-op-badge edit-badge">编辑</span>}
+            <span className="tool-file-path">{displayPath || '未知文件'}</span>
+            {isReadOp && <span className="file-op-badge read-badge">读取</span>}
+            {isWriteOp && <span className="file-op-badge write-badge">写入</span>}
+            {isEditOp && <span className="file-op-badge edit-badge">编辑</span>}
           </div>
           
           {/* read_file: 显示带行号的内容 */}
           {isReadOp && typeof data === "string" && (
-            <div class="file-read-container">
-              <div class="file-stats">
+            <div className="file-read-container">
+              <div className="file-stats">
                 <span>行数: {data.split('\n').length}</span>
                 <span>字符: {data.length}</span>
               </div>
-              <pre class="tool-file-content with-line-numbers">
+              <pre className="tool-file-content with-line-numbers">
                 {data.split('\n').slice(0, 100).map((line, idx) => (
-                  <div key={idx} class="code-line">
-                    <span class="line-number">{idx + 1}</span>
-                    <span class="line-content">{line}</span>
+                  <div key={idx} className="code-line">
+                    <span className="line-number">{idx + 1}</span>
+                    <span className="line-content">{line}</span>
                   </div>
                 ))}
                 {data.split('\n').length > 100 && (
-                  <div class="code-line-more">… 还有 {data.split('\n').length - 100} 行</div>
+                  <div className="code-line-more">… 还有 {data.split('\n').length - 100} 行</div>
                 )}
               </pre>
             </div>
@@ -4051,29 +3843,29 @@ function ToolMessageLegacy({
           
           {/* write_file/edit_file: 显示修改摘要 */}
           {!isReadOp && (
-            <div class="file-write-summary">
-              <div class="summary-item success">
+            <div className="file-write-summary">
+              <div className="summary-item success">
                 <Icons.Logo />
                 <span>操作成功</span>
               </div>
               {(args as any)?.CodeContent && (
-                <div class="summary-item">
+                <div className="summary-item">
                   <span>新增内容: {((args as any).CodeContent as string).split('\n').length} 行</span>
                 </div>
               )}
               {(args as any)?.Instruction && (
-                <div class="summary-item instruction">
+                <div className="summary-item instruction">
                   <Icons.Tool />
                   <span>{(args as any).Instruction}</span>
                 </div>
               )}
               {(args as any)?.ReplacementChunks && (
-                <div class="summary-item">
+                <div className="summary-item">
                   <span>修改块数: {((args as any).ReplacementChunks as any[]).length}</span>
                 </div>
               )}
               {typeof output === 'string' && output.includes('Updated') && (
-                <div class="summary-item">
+                <div className="summary-item">
                   <span>{output}</span>
                 </div>
               )}
@@ -4093,14 +3885,14 @@ function ToolMessageLegacy({
         items = data.map(i => typeof i === "string" ? i : (i.name || formatJson(i)));
       }
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
-            <Icons.Folder /> <span class="tool-file-path">{path || "当前目录"}</span>
+        <div className="tool-file-box">
+          <div className="tool-file-header">
+            <Icons.Folder /> <span className="tool-file-path">{path || "当前目录"}</span>
           </div>
           {status === "done" && (
-            <div class="tool-ls-grid">
+            <div className="tool-ls-grid">
               {items.map((item, idx) => (
-                <div key={idx} class="tool-ls-item">
+                <div key={idx} className="tool-ls-item">
                   {item.includes("/") || !item.includes(".") ? <Icons.Folder /> : <Icons.Pdf />}
                   <span>{item}</span>
                 </div>
@@ -4116,12 +3908,12 @@ function ToolMessageLegacy({
       const query = (args as any)?.Query || (args as any)?.Pattern || "";
       const path = (args as any)?.SearchPath || (args as any)?.SearchDirectory || "";
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
-            <Icons.Search /> <span class="tool-file-path">{path || "搜索结果"}: {query}</span>
+        <div className="tool-file-box">
+          <div className="tool-file-header">
+            <Icons.Search /> <span className="tool-file-path">{path || "搜索结果"}: {query}</span>
           </div>
           {status === "done" && (
-            <pre class="tool-file-content">{typeof data === "string" ? data : formatJson(data)}</pre>
+            <pre className="tool-file-content">{typeof data === "string" ? data : formatJson(data)}</pre>
           )}
         </div>
       );
@@ -4132,17 +3924,17 @@ function ToolMessageLegacy({
       const desc = (args as any)?.description || "";
       const name = (args as any)?.name || "";
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
-            <Icons.Bolt /> <span class="tool-file-path">分派子任务: {name || desc}</span>
+        <div className="tool-file-box">
+          <div className="tool-file-header">
+            <Icons.Bolt /> <span className="tool-file-path">分派子任务: {name || desc}</span>
           </div>
-          <div class="tool-fetch-body">
-            <div class="tool-fetch-title">任务描述</div>
-            <div class="tool-fetch-content">{desc}</div>
+          <div className="tool-fetch-body">
+            <div className="tool-fetch-title">任务描述</div>
+            <div className="tool-fetch-content">{desc}</div>
             {status === "done" && (
               <>
-                <div class="tool-fetch-title" style={{marginTop: '8px'}}>执行结果</div>
-                <div class="tool-fetch-content">{typeof data === "string" ? data : formatJson(data)}</div>
+                <div className="tool-fetch-title" style={{marginTop: '8px'}}>执行结果</div>
+                <div className="tool-fetch-content">{typeof data === "string" ? data : formatJson(data)}</div>
               </>
             )}
           </div>
@@ -4155,14 +3947,14 @@ function ToolMessageLegacy({
       const url = (args as any)?.url || "";
       const method = (args as any)?.method || "GET";
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
-            <Icons.Globe /> <span class="tool-file-path">[{method}] {url}</span>
+        <div className="tool-file-box">
+          <div className="tool-file-header">
+            <Icons.Globe /> <span className="tool-file-path">[{method}] {url}</span>
           </div>
           {status === "done" && (
-            <div class="tool-fetch-body">
-              <div class="tool-fetch-title">响应状态</div>
-              <div class="tool-fetch-content">{formatJson(data)}</div>
+            <div className="tool-fetch-body">
+              <div className="tool-fetch-title">响应状态</div>
+              <div className="tool-fetch-content">{formatJson(data)}</div>
             </div>
           )}
         </div>
@@ -4175,14 +3967,14 @@ function ToolMessageLegacy({
       const title = (data as any)?.title || "";
       const content = (data as any)?.markdown_content || (data as any)?.markdown || (data as any)?.content || "";
       return (
-        <div class="tool-file-box">
-          <div class="tool-file-header">
-            <Icons.Link /> <span class="tool-file-path">{url}</span>
+        <div className="tool-file-box">
+          <div className="tool-file-header">
+            <Icons.Link /> <span className="tool-file-path">{url}</span>
           </div>
           {status === "done" && (
-            <div class="tool-fetch-body">
-              {title && <div class="tool-fetch-title">{title}</div>}
-              <div class="tool-fetch-content">{content}</div>
+            <div className="tool-fetch-body">
+              {title && <div className="tool-fetch-title">{title}</div>}
+              <div className="tool-fetch-content">{content}</div>
             </div>
           )}
         </div>
@@ -4234,39 +4026,39 @@ function ToolMessageLegacy({
       
       if (Array.isArray(todos) && todos.length > 0) {
         return (
-          <div class="tool-todos-container">
-            <div class="tool-todos-header">
+          <div className="tool-todos-container">
+            <div className="tool-todos-header">
               <Icons.Apps />
-              <span class="tool-todos-title">任务列表</span>
-              <span class="tool-todos-count">{todos.length} 项</span>
+              <span className="tool-todos-title">任务列表</span>
+              <span className="tool-todos-count">{todos.length} 项</span>
             </div>
-            <div class="tool-todos-list">
+            <div className="tool-todos-list">
               {todos.map((todo: any, idx: number) => {
                 const todoStatus = todo.status || "pending";
                 const todoPriority = todo.priority || "medium";
                 const todoContent = todo.content || todo.task || "";
                 
                 return (
-                  <div key={idx} class={`tool-todo-item tool-todo-${todoStatus}`}>
-                    <div class="tool-todo-checkbox">
+                  <div key={idx} className={`tool-todo-item tool-todo-${todoStatus}`}>
+                    <div className="tool-todo-checkbox">
                       {todoStatus === "completed" && (
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
                         </svg>
                       )}
                       {todoStatus === "in_progress" && (
-                        <div class="tool-todo-spinner"></div>
+                        <div className="tool-todo-spinner"></div>
                       )}
                       {todoStatus === "pending" && (
-                        <div class="tool-todo-circle"></div>
+                        <div className="tool-todo-circle"></div>
                       )}
                     </div>
-                    <div class="tool-todo-content">
-                      <span class={todoStatus === "completed" ? "tool-todo-text-completed" : ""}>
+                    <div className="tool-todo-content">
+                      <span className={todoStatus === "completed" ? "tool-todo-text-completed" : ""}>
                         {todoContent}
                       </span>
                       {todoPriority === "high" && (
-                        <span class="tool-todo-priority-high">高优先级</span>
+                        <span className="tool-todo-priority-high">高优先级</span>
                       )}
                     </div>
                   </div>
@@ -4280,9 +4072,9 @@ function ToolMessageLegacy({
 
     // Default rendering: 避免直接展示 JSON
     if (typeof data === "string") {
-      return <pre class="tool-text-output">{data}</pre>;
+      return <pre className="tool-text-output">{data}</pre>;
     }
-    return <div class="ref-muted">暂无可展示内容</div>;
+    return <div className="ref-muted">暂无可展示内容</div>;
   };
 
   // 生成工具描述文本
@@ -4317,15 +4109,15 @@ function ToolMessageLegacy({
   const containerClass = `tool-container ${status === "running" ? "tool-running" : status === "error" ? "tool-error" : "tool-done"}`;
 
   return (
-    <div class={containerClass}>
-      <div class="tool-header" onClick={() => setIsOpen(!isOpen)}>
-        <div class="tool-info">
-          <span class="tool-dot" />
-          <span class="tool-name">{getToolDescription()}</span>
+    <div className={containerClass}>
+      <div className="tool-header" onClick={() => setIsOpen(!isOpen)}>
+        <div className="tool-info">
+          <span className="tool-dot" />
+          <span className="tool-name">{getToolDescription()}</span>
         </div>
-        <span class="chevron">{isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
+        <span className="chevron">{isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
       </div>
-      {isOpen && <div class="tool-body">{renderContent()}</div>}
+      {isOpen && <div className="tool-body">{renderContent()}</div>}
     </div>
   );
 }
@@ -4343,12 +4135,12 @@ function FileTreeFlat({ node, onSelect, selected }: { node: TreeNode; onSelect: 
   const files = useMemo(() => flatten(node), [node]);
 
   return (
-    <div class="file-list">
+    <div className="file-list">
       {files.map(file => (
-        <div key={file.path} class="file-item" onClick={() => onSelect(file.path)}>
-           <div class="file-icon"><Icons.Pdf /></div> 
-           <div class="file-name">{file.name}</div>
-           <div class="checkbox-wrapper">
+        <div key={file.path} className="file-item" onClick={() => onSelect(file.path)}>
+           <div className="file-icon"><Icons.Pdf /></div> 
+           <div className="file-name">{file.name}</div>
+           <div className="checkbox-wrapper">
               <input type="checkbox" checked={selected.has(file.path)} readOnly />
            </div>
         </div>

@@ -1,4 +1,4 @@
-import type { ComponentChild } from "preact";
+import type { ReactNode } from "react";
 import type { RagReference } from "../../types";
 import { maxRefIndex, extractUrlReferences, getFaviconUrl } from "../../types/utils";
 
@@ -15,10 +15,10 @@ export function AssistantContent({
 }) {
   if (isPending && !text) {
     return (
-      <div class="assistant-thinking">
-        <span class="dot" />
-        <span class="dot" />
-        <span class="dot" />
+      <div className="assistant-thinking">
+        <span className="dot" />
+        <span className="dot" />
+        <span className="dot" />
       </div>
     );
   }
@@ -29,7 +29,7 @@ export function AssistantContent({
   const processedText = extracted.text;
 
   const renderInline = (value: string) => {
-    const nodes: Array<ComponentChild> = [];
+    const nodes: Array<ReactNode> = [];
     const re = /(\[(\d+)\])|(\*\*(.*?)\*\*)|(\*(.*?)\*)/g;
     let lastIdx = 0;
     let mm: RegExpExecArray | null;
@@ -37,7 +37,7 @@ export function AssistantContent({
     while ((mm = re.exec(value)) !== null) {
       const start = mm.index;
       const end = start + mm[0].length;
-      
+
       if (start > lastIdx) {
         nodes.push(value.slice(lastIdx, start));
       }
@@ -49,9 +49,9 @@ export function AssistantContent({
         if (ragExists) {
           nodes.push(
             <button
-              key={`${start}-${idx}`}
+              key={`ref-${start}-${idx}`}
               type="button"
-              class="ref-chip"
+              className="ref-chip"
               onClick={() => onOpenRef(idx)}
               title="查看引用"
             >
@@ -62,25 +62,25 @@ export function AssistantContent({
           const iconUrl = getFaviconUrl(urlRef.url);
           nodes.push(
             <a
-              key={`${start}-${idx}`}
-              class="ref-chip ref-link"
+              key={`url-${start}-${idx}`}
+              className="ref-chip ref-link"
               href={urlRef.url}
               target="_blank"
               rel="noreferrer"
               title={urlRef.url}
             >
-              {iconUrl ? <img class="ref-favicon" src={iconUrl} alt="" loading="lazy" /> : null}
+              {iconUrl ? <img className="ref-favicon" src={iconUrl} alt="" loading="lazy" /> : null}
               [{idx}]
             </a>,
           );
         } else {
           // 无对应 references 数据时，渲染为纯文本而非按钮
-          nodes.push(<span key={`${start}-${idx}`} class="ref-text-only">[{idx}]</span>);
+          nodes.push(<span key={`txt-${start}-${idx}`} className="ref-text-only">[{idx}]</span>);
         }
       } else if (mm[3]) {
-        nodes.push(<strong class="md-bold">{mm[4]}</strong>);
+        nodes.push(<strong key={`bold-${start}`} className="md-bold">{mm[4]}</strong>);
       } else if (mm[5]) {
-        nodes.push(<em class="md-italic">{mm[6]}</em>);
+        nodes.push(<em key={`em-${start}`} className="md-italic">{mm[6]}</em>);
       }
 
       lastIdx = end;
@@ -94,12 +94,13 @@ export function AssistantContent({
 
   const renderMarkdownBlocks = (src: string) => {
     const lines = src.replace(/\r\n/g, "\n").split("\n");
-    const blocks: ComponentChild[] = [];
+    const blocks: ReactNode[] = [];
     let i = 0;
+    let blockIdx = 0;
 
     while (i < lines.length) {
       const line = lines[i];
-      
+
       if (line.trim().startsWith("```")) {
         const lang = line.trim().slice(3).trim();
         i += 1;
@@ -110,9 +111,9 @@ export function AssistantContent({
         }
         i += 1;
         blocks.push(
-          <div class="md-code-block">
-            {lang && <div class="md-code-lang">{lang}</div>}
-            <pre class="md-code" data-lang={lang || undefined}>
+          <div key={`code-${blockIdx++}`} className="md-code-block">
+            {lang && <div className="md-code-lang">{lang}</div>}
+            <pre className="md-code" data-lang={lang || undefined}>
               <code>{codeLines.join("\n")}</code>
             </pre>
           </div>
@@ -125,7 +126,7 @@ export function AssistantContent({
         const level = heading[1].length;
         const content = heading[2] || "";
         const Tag = (`h${Math.min(level, 6)}` as unknown) as any;
-        blocks.push(<Tag class={`md-heading h${level}`}>{renderInline(content)}</Tag>);
+        blocks.push(<Tag key={`h-${blockIdx++}`} className={`md-heading h${level}`}>{renderInline(content)}</Tag>);
         i += 1;
         continue;
       }
@@ -139,14 +140,14 @@ export function AssistantContent({
           i += 1;
         }
         blocks.push(
-          <div class="md-table-wrapper">
-            <table class="md-table">
+          <div key={`table-${blockIdx++}`} className="md-table-wrapper">
+            <table className="md-table">
               <thead>
-                <tr>{rows[0].map(cell => <th>{renderInline(cell)}</th>)}</tr>
+                <tr>{rows[0].map((cell, ci) => <th key={ci}>{renderInline(cell)}</th>)}</tr>
               </thead>
               <tbody>
-                {rows.slice(1).map(row => (
-                  <tr>{row.map(cell => <td>{renderInline(cell)}</td>)}</tr>
+                {rows.slice(1).map((row, ri) => (
+                  <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{renderInline(cell)}</td>)}</tr>
                 ))}
               </tbody>
             </table>
@@ -157,27 +158,29 @@ export function AssistantContent({
 
       const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
       if (bullet) {
-        const items: ComponentChild[] = [];
+        const items: ReactNode[] = [];
+        let itemIdx = 0;
         while (i < lines.length) {
           const m = /^\s*[-*]\s+(.*)$/.exec(lines[i]);
           if (!m) break;
-          items.push(<li>{renderInline(m[1] || "")}</li>);
+          items.push(<li key={itemIdx++}>{renderInline(m[1] || "")}</li>);
           i += 1;
         }
-        blocks.push(<ul class="md-ul">{items}</ul>);
+        blocks.push(<ul key={`ul-${blockIdx++}`} className="md-ul">{items}</ul>);
         continue;
       }
 
       const numbered = /^\s*(\d+)\.\s+(.*)$/.exec(line);
       if (numbered) {
-        const items: ComponentChild[] = [];
+        const items: ReactNode[] = [];
+        let itemIdx = 0;
         while (i < lines.length) {
           const m = /^\s*(\d+)\.\s+(.*)$/.exec(lines[i]);
           if (!m) break;
-          items.push(<li>{renderInline(m[2] || "")}</li>);
+          items.push(<li key={itemIdx++}>{renderInline(m[2] || "")}</li>);
           i += 1;
         }
-        blocks.push(<ol class="md-ol">{items}</ol>);
+        blocks.push(<ol key={`ol-${blockIdx++}`} className="md-ol">{items}</ol>);
         continue;
       }
 
@@ -188,20 +191,20 @@ export function AssistantContent({
 
       const paraLines: string[] = [line];
       i += 1;
-      while (i < lines.length && lines[i].trim() && 
-             !lines[i].trim().startsWith("```") && 
-             !/^\s{0,3}#{1,6}\s+/.test(lines[i]) && 
+      while (i < lines.length && lines[i].trim() &&
+             !lines[i].trim().startsWith("```") &&
+             !/^\s{0,3}#{1,6}\s+/.test(lines[i]) &&
              !/^\s*[-*]\s+/.test(lines[i]) &&
              !/^\s*\d+\.\s+/.test(lines[i]) &&
              !lines[i].trim().startsWith("|")) {
         paraLines.push(lines[i]);
         i += 1;
       }
-      blocks.push(<p class="md-p">{renderInline(paraLines.join("\n"))}</p>);
+      blocks.push(<p key={`p-${blockIdx++}`} className="md-p">{renderInline(paraLines.join("\n"))}</p>);
     }
 
     return blocks;
   };
 
-  return <div class="md-root">{renderMarkdownBlocks(processedText)}</div>;
+  return <div className="md-root">{renderMarkdownBlocks(processedText)}</div>;
 }

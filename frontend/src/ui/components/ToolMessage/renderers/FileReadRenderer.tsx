@@ -8,11 +8,11 @@ export function FileReadRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-file-read">
-        <div class="tool-file-read__header">
+      <div className="tool-file-read">
+        <div className="tool-file-read__header">
           <FilePath path={path} />
         </div>
-        <div class="tool-running-hint">正在读取文件...</div>
+        <div className="tool-running-hint">正在读取文件...</div>
       </div>
     );
   }
@@ -32,10 +32,10 @@ export function FileReadRenderer({ status, args, output }: ToolRendererProps) {
   const displayLines = lines.slice(0, 100); // 最多显示100行
 
   return (
-    <div class="tool-file-read">
-      <div class="tool-file-read__header">
+    <div className="tool-file-read">
+      <div className="tool-file-read__header">
         <FilePath path={path} />
-        <span class="tool-file-read__lines">
+        <span className="tool-file-read__lines">
           {endLine
             ? `第 ${startLine}-${endLine} 行`
             : lines.length > 100
@@ -44,17 +44,17 @@ export function FileReadRenderer({ status, args, output }: ToolRendererProps) {
         </span>
       </div>
       
-      <pre class="tool-file-read__content">
+      <pre className="tool-file-read__content">
         {displayLines.map((line, idx) => (
-          <div key={idx} class="tool-file-read__line">
-            <span class="tool-file-read__line-number">{startLine + idx}</span>
-            <span class="tool-file-read__line-content">{line}</span>
+          <div key={idx} className="tool-file-read__line">
+            <span className="tool-file-read__line-number">{startLine + idx}</span>
+            <span className="tool-file-read__line-content">{line}</span>
           </div>
         ))}
         {lines.length > 100 && (
-          <div class="tool-file-read__line tool-file-read__line--truncated">
-            <span class="tool-file-read__line-number">...</span>
-            <span class="tool-file-read__line-content">（还有 {lines.length - 100} 行未显示）</span>
+          <div className="tool-file-read__line tool-file-read__line--truncated">
+            <span className="tool-file-read__line-number">...</span>
+            <span className="tool-file-read__line-content">（还有 {lines.length - 100} 行未显示）</span>
           </div>
         )}
       </pre>

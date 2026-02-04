@@ -18,8 +18,8 @@ export function Badge({
   }[variant];
 
   return (
-    <span class={`tool-badge ${variantClass}`}>
-      {icon && <span class="tool-badge__icon">{icon}</span>}
+    <span className={`tool-badge ${variantClass}`}>
+      {icon && <span className="tool-badge__icon">{icon}</span>}
       {children}
     </span>
   );

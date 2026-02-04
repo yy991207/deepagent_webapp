@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect } from "react";
 import type { SourceItem, DragState, DragPosition } from "../types";
 
 export type FileTreeState = {

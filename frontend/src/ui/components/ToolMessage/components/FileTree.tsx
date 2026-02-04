@@ -28,13 +28,13 @@ export function DirectoryGrid({
   };
 
   return (
-    <div class="tool-ls__grid">
+    <div className="tool-ls__grid">
       {items.map((item, idx) => {
         const type = getItemType(item);
         return (
           <div
             key={idx}
-            class={`tool-ls__item ${type === "folder" ? "tool-ls__item--folder" : ""}`}
+            className={`tool-ls__item ${type === "folder" ? "tool-ls__item--folder" : ""}`}
             onClick={() => onItemClick?.(item)}
           >
             {type === "folder" ? <Icons.Folder /> : <Icons.File />}
@@ -60,17 +60,17 @@ export function ToolFileTree({
   const treeItems = items as FileTreeItem[];
 
   return (
-    <div class="tool-file-tree" style={{ paddingLeft: level > 0 ? "16px" : 0 }}>
+    <div className="tool-file-tree" style={{ paddingLeft: level > 0 ? "16px" : 0 }}>
       {treeItems.map((item, idx) => (
         <div key={idx}>
           <div
-            class={`tool-file-tree__item ${item.type === "folder" ? "tool-file-tree__item--folder" : ""}`}
+            className={`tool-file-tree__item ${item.type === "folder" ? "tool-file-tree__item--folder" : ""}`}
             onClick={() => onItemClick?.(item)}
           >
-            <span class="tool-file-tree__icon">
+            <span className="tool-file-tree__icon">
               {item.type === "folder" ? <Icons.Folder /> : <Icons.File />}
             </span>
-            <span class="tool-file-tree__name">{item.name}</span>
+            <span className="tool-file-tree__name">{item.name}</span>
           </div>
           {item.children && item.children.length > 0 && (
             <ToolFileTree
@@ -94,7 +94,7 @@ export function FilePath({
   icon?: boolean;
 }) {
   return (
-    <span class="tool-file-read__path">
+    <span className="tool-file-read__path">
       {icon && <Icons.File />}
       {path}
     </span>

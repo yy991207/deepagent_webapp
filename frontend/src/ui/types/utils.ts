@@ -68,9 +68,28 @@ export const extractUrlReferences = (input: string, startIndex: number): { text:
   return { text, urlRefs };
 };
 
+const isLikelyHostname = (hostname: string) => {
+  if (!hostname) return false;
+  if (hostname === "localhost") return false;
+  if (!hostname.includes(".")) return false;
+  if (hostname.startsWith(".") || hostname.endsWith(".")) return false;
+  if (hostname.includes("..")) return false;
+  if (!/^[a-z0-9.-]+$/i.test(hostname)) return false;
+  const parts = hostname.split(".");
+  const tld = parts[parts.length - 1] || "";
+  return tld.length >= 2 && tld.length <= 24;
+};
+
 export const getFaviconUrl = (url: string) => {
   try {
     const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return "";
+    }
+    // 过滤明显无效的域名，避免 favicon 请求 404 造成控制台噪音
+    if (!isLikelyHostname(u.hostname)) {
+      return "";
+    }
     return `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(u.hostname)}`;
   } catch {
     return "";

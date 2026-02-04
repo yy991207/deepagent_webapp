@@ -8,11 +8,11 @@ export function FileWriteRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-file-write">
-        <div class="tool-file-write__header">
+      <div className="tool-file-write">
+        <div className="tool-file-write__header">
           <FilePath path={path} />
-          <span class="tool-file-write__status tool-file-write__status--running">
-            <span class="tool-todo__spinner" style={{ width: "12px", height: "12px" }} />
+          <span className="tool-file-write__status tool-file-write__status--running">
+            <span className="tool-todo__spinner" style={{ width: "12px", height: "12px" }} />
             正在写入...
           </span>
         </div>
@@ -38,10 +38,10 @@ export function FileWriteRenderer({ status, args, output }: ToolRendererProps) {
   const bytes = content ? new Blob([content]).size : 0;
 
   return (
-    <div class="tool-file-write">
-      <div class="tool-file-write__header">
+    <div className="tool-file-write">
+      <div className="tool-file-write__header">
         <FilePath path={path} />
-        <span class={`tool-file-write__status ${success ? "" : "tool-file-write__status--error"}`}>
+        <span className={`tool-file-write__status ${success ? "" : "tool-file-write__status--error"}`}>
           {success ? (
             <>
               <Icons.Check />
@@ -59,13 +59,13 @@ export function FileWriteRenderer({ status, args, output }: ToolRendererProps) {
       </div>
       
       {lines > 0 && (
-        <div class="tool-file-write__stats">
+        <div className="tool-file-write__stats">
           {lines} 行 · {formatBytes(bytes)}
         </div>
       )}
       
       {message && !success && (
-        <div class="tool-file-write__error">
+        <div className="tool-file-write__error">
           {message}
         </div>
       )}

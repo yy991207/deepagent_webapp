@@ -6,14 +6,14 @@ export function FetchUrlRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-fetch">
-        <div class="tool-fetch__header">
+      <div className="tool-fetch">
+        <div className="tool-fetch__header">
           <Icons.Link />
-          <a class="tool-fetch__url" href={url} target="_blank" rel="noopener noreferrer">
+          <a className="tool-fetch__url" href={url} target="_blank" rel="noopener noreferrer">
             {url}
           </a>
         </div>
-        <div class="tool-running-hint">正在抓取内容...</div>
+        <div className="tool-running-hint">正在抓取内容...</div>
       </div>
     );
   }
@@ -36,22 +36,22 @@ export function FetchUrlRenderer({ status, args, output }: ToolRendererProps) {
   const displayContent = truncated ? content.slice(0, maxLength) : content;
 
   return (
-    <div class="tool-fetch">
-      <div class="tool-fetch__header">
+    <div className="tool-fetch">
+      <div className="tool-fetch__header">
         <Icons.Link />
-        <a class="tool-fetch__url" href={url} target="_blank" rel="noopener noreferrer">
+        <a className="tool-fetch__url" href={url} target="_blank" rel="noopener noreferrer">
           {url}
         </a>
       </div>
       
       {title && (
-        <div class="tool-fetch__title">{title}</div>
+        <div className="tool-fetch__title">{title}</div>
       )}
       
-      <div class="tool-fetch__content">
+      <div className="tool-fetch__content">
         {displayContent}
         {truncated && (
-          <span class="tool-fetch__truncated">
+          <span className="tool-fetch__truncated">
             ...（内容已截断，共 {content.length} 字符）
           </span>
         )}

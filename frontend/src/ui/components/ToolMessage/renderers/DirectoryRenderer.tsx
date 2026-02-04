@@ -6,8 +6,8 @@ export function DirectoryRenderer({ status, args, output }: ToolRendererProps) {
   
   if (status === "running") {
     return (
-      <div class="tool-ls">
-        <div class="tool-running-hint">正在列出 {path} 目录...</div>
+      <div className="tool-ls">
+        <div className="tool-running-hint">正在列出 {path} 目录...</div>
       </div>
     );
   }
@@ -44,14 +44,14 @@ export function DirectoryRenderer({ status, args, output }: ToolRendererProps) {
 
   if (items.length === 0) {
     return (
-      <div class="tool-ls">
-        <div class="tool-text">目录为空</div>
+      <div className="tool-ls">
+        <div className="tool-text">目录为空</div>
       </div>
     );
   }
 
   return (
-    <div class="tool-ls">
+    <div className="tool-ls">
       <DirectoryGrid items={items} />
     </div>
   );

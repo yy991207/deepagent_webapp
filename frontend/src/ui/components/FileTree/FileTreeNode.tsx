@@ -1,4 +1,5 @@
-import { useCallback, useRef } from "preact/hooks";
+import { useCallback, useRef } from "react";
+import type { MouseEvent, DragEvent } from "react";
 import type { SourceItem, SourceTreeNode, DragState, DragPosition } from "../../types";
 import { KebabMenu } from "./KebabMenu";
 import { FileIcon } from "./FileIcon";
@@ -54,7 +55,7 @@ export function FileTreeNode({
   };
 
   const handleClick = useCallback(
-    (e: MouseEvent) => {
+    (e: MouseEvent<HTMLDivElement>) => {
       e.stopPropagation();
       if (isFolder) {
         onToggleExpand(node.id);
@@ -66,7 +67,7 @@ export function FileTreeNode({
   );
 
   const handleCheckboxClick = useCallback(
-    (e: MouseEvent) => {
+    (e: MouseEvent<HTMLSpanElement>) => {
       e.stopPropagation();
       onToggleCheck(node.id);
     },
@@ -74,7 +75,7 @@ export function FileTreeNode({
   );
 
   const handleDragStart = useCallback(
-    (e: DragEvent) => {
+    (e: DragEvent<HTMLDivElement>) => {
       e.stopPropagation();
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = "move";
@@ -86,7 +87,7 @@ export function FileTreeNode({
   );
 
   const handleDragOver = useCallback(
-    (e: DragEvent) => {
+    (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -119,14 +120,14 @@ export function FileTreeNode({
   );
 
   const handleDragEnd = useCallback(
-    (e: DragEvent) => {
+    (e: DragEvent<HTMLDivElement>) => {
       e.stopPropagation();
       onDragEnd();
     },
     [onDragEnd]
   );
 
-  const handleMenuClick = useCallback((e: MouseEvent) => {
+  const handleMenuClick = useCallback((e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     onMenuToggle(node.id);
   }, [node.id, onMenuToggle]);
@@ -190,10 +191,10 @@ export function FileTreeNode({
       ];
 
   return (
-    <div class="file-tree-node-wrapper">
+    <div className="file-tree-node-wrapper">
       <div
         ref={nodeRef}
-        class={[
+        className={[
           "file-tree-node",
           isSelected && "selected",
           isDragging && "dragging",
@@ -211,7 +212,7 @@ export function FileTreeNode({
         {/* 展开/折叠按钮（仅文件夹） */}
         {isFolder && (
           <span
-            class={`expand-icon ${node.expanded ? "expanded" : ""}`}
+            className={`expand-icon ${node.expanded ? "expanded" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
               onToggleExpand(node.id);
@@ -222,17 +223,17 @@ export function FileTreeNode({
                 d="M4 2 L8 6 L4 10"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="1.5"
+                strokeWidth="1.5"
               />
             </svg>
           </span>
         )}
-        {!isFolder && <span class="expand-icon-placeholder" />}
+        {!isFolder && <span className="expand-icon-placeholder" />}
 
         {/* 复选框（仅文件） */}
         {!isFolder && (
           <span
-            class={`file-checkbox ${isChecked ? "checked" : ""}`}
+            className={`file-checkbox ${isChecked ? "checked" : ""}`}
             onClick={handleCheckboxClick}
             title={isChecked ? "取消选中" : "选中此文件"}
           >
@@ -253,13 +254,13 @@ export function FileTreeNode({
         <FileIcon type={isFolder ? "folder" : (node.file_type || "file")} expanded={node.expanded} />
 
         {/* 文件名 */}
-        <span class="file-name" title={node.filename}>
+        <span className="file-name" title={node.filename}>
           {node.filename}
         </span>
 
         {/* 三点菜单 */}
         <button
-          class="kebab-menu-trigger"
+          className="kebab-menu-trigger"
           onClick={handleMenuClick}
           title="更多操作"
         >
@@ -281,7 +282,7 @@ export function FileTreeNode({
 
       {/* 子节点 */}
       {isFolder && node.expanded && node.children.length > 0 && (
-        <div class="file-tree-children">
+        <div className="file-tree-children">
           {node.children.map((child) => (
             <FileTreeNode
               key={child.id}
