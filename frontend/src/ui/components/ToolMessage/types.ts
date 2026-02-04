@@ -75,7 +75,7 @@ export interface ResultItem {
   url?: string;
   score?: number;
   source?: string;
-  icon?: ComponentChild;
+  icon?: ReactNode;
 }
 
 // 结果列表 Props

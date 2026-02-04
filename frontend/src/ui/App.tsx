@@ -1436,8 +1436,8 @@ function App() {
     setPendingUploadFiles([]);
   };
 
-  const onDirectoryChosen = (e: Event) => {
-    const input = e.target as HTMLInputElement;
+  const onDirectoryChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
     const list = Array.from(input.files || []);
     setPendingUploadFiles(list);
     if (list.length > 0) {
@@ -1882,7 +1882,7 @@ function App() {
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Command/Ctrl + Enter 发送消息
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();

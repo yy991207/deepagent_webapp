@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
+
 export interface BadgeProps {
-  children: preact.ComponentChildren;
+  children: ReactNode;
   variant?: "default" | "success" | "error" | "warning" | "info";
-  icon?: preact.ComponentChild;
+  icon?: ReactNode;
 }
 
 export function Badge({
