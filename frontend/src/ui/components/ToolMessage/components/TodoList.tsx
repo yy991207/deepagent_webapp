@@ -18,17 +18,17 @@ export interface TodoListProps {
 
 function StatusIcon({ status, index, isLast }: { status: TodoItem["status"]; index: number; isLast: boolean }) {
   return (
-    <div className="flex flex-col items-center mr-3 relative">
+    <div className="flex flex-col items-center mr-3 relative self-stretch">
       {/* Vertical Line */}
       {!isLast && (
-        <div className="absolute top-6 bottom-[-16px] w-px bg-border/60" />
+        <div className="absolute top-8 bottom-0 w-px bg-border/40" />
       )}
       
       <div className={cn(
-        "relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-colors bg-card",
+        "relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-all mt-3.5",
         status === "completed" && "bg-green-500 border-green-500 text-white",
-        status === "in_progress" && "border-blue-500 text-blue-500",
-        status === "pending" && "border-muted-foreground/30 text-transparent"
+        status === "in_progress" && "border-blue-500 text-blue-500 bg-white",
+        status === "pending" && "border-zinc-300 text-transparent bg-white"
       )}>
         {status === "completed" && (
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -70,58 +70,37 @@ export function TodoList({
 
   return (
     <div className="w-full font-sans text-sm">
-      {showHeader && (
-        <div 
-          className="flex items-center justify-between py-2 px-1 cursor-pointer select-none group"
-          onClick={() => setIsCollapsed(!isCollapsed)}
-        >
-          <div className="flex items-center gap-2">
-             <span className={cn(
-               "font-medium",
-               status === "running" ? "text-blue-600 animate-pulse" : "text-foreground"
-             )}>
-               {headerTitle}
-             </span>
-             {duration && (
-               <span className="text-muted-foreground text-xs">for {duration}</span>
-             )}
-          </div>
-          
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <span className="text-xs">
-              {completedCount} / {items.length} tasks done
-            </span>
-            <div className="transition-transform duration-200" style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
-              <Icons.ChevronDown />
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* 移除内置头部，使用外部统一头部 */}
+      
       {!isCollapsed && (
-        <div className="mt-1 flex flex-col gap-0 border rounded-lg bg-card/50 overflow-hidden shadow-sm">
+        <div className="mt-2 flex flex-col gap-2">
           {items.map((item, idx) => (
             <div
               key={item.id || idx}
-              className={cn(
-                "flex items-start px-4 py-3 border-b last:border-0 transition-colors",
-                item.status === "in_progress" ? "bg-accent/30" : "bg-transparent"
-              )}
+              className="flex items-start group"
             >
               <StatusIcon status={item.status} index={idx} isLast={idx === items.length - 1} />
               
               <div className={cn(
-                "flex-1 leading-5 pt-0.5",
-                item.status === "completed" ? "text-muted-foreground" : "text-foreground",
-                 item.status === "in_progress" ? "font-medium text-blue-700" : ""
+                "flex-1 px-4 py-3 rounded-2xl transition-all border",
+                item.status === "in_progress" 
+                  ? "bg-blue-50/50 border-blue-100/50 shadow-sm" 
+                  : "bg-zinc-50/50 border-zinc-100 hover:bg-zinc-100 hover:border-zinc-200",
+                item.status === "completed" && "opacity-75"
               )}>
-                {item.content}
+                <div className={cn(
+                  "leading-relaxed",
+                  item.status === "completed" ? "text-muted-foreground" : "text-foreground",
+                  item.status === "in_progress" ? "font-medium text-blue-700" : ""
+                )}>
+                  {item.content}
+                </div>
               </div>
             </div>
           ))}
           
           {items.length === 0 && (
-            <div className="px-4 py-8 text-center text-muted-foreground">
+            <div className="px-4 py-8 text-center text-muted-foreground bg-zinc-50 rounded-2xl border border-zinc-100">
               No tasks
             </div>
           )}

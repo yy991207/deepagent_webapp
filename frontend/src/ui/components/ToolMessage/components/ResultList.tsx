@@ -143,7 +143,7 @@ export function SearchResultList({
   };
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-1">
+    <div className="flex flex-col gap-2 p-1">
       {results.map((result, idx) => {
         const domain = getDomain(result.url);
         
@@ -159,26 +159,29 @@ export function SearchResultList({
                 onResultClick(result);
               }
             }}
-            className="flex flex-col p-3 rounded-xl border bg-card hover:bg-accent/50 transition-colors group text-left no-underline h-full shadow-sm"
+            className="group flex items-start gap-3 px-4 py-3 rounded-2xl transition-all border bg-zinc-50/50 border-zinc-100 hover:bg-zinc-100 hover:border-zinc-200 text-left no-underline"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 border border-border/50">
+            <div className="flex-shrink-0 mt-0.5">
+              <div className="w-5 h-5 rounded-full bg-white border border-zinc-200 flex items-center justify-center overflow-hidden">
                 <Favicon url={result.url} />
               </div>
-              <span className="text-xs text-muted-foreground font-medium truncate">
-                {domain}
-              </span>
             </div>
             
-            <div className="font-medium text-sm text-card-foreground leading-snug mb-1.5 line-clamp-2 group-hover:text-primary transition-colors">
-              {result.title}
-            </div>
-            
-            {result.snippet && (
-              <div className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-auto">
-                {result.snippet}
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm text-foreground leading-snug mb-1 group-hover:text-blue-600 transition-colors">
+                {result.title}
               </div>
-            )}
+              
+              <div className="text-xs text-muted-foreground mb-1.5 truncate">
+                {domain}
+              </div>
+              
+              {result.snippet && (
+                <div className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                  {result.snippet}
+                </div>
+              )}
+            </div>
           </a>
         );
       })}

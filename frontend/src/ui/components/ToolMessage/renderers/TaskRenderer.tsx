@@ -1,7 +1,8 @@
 import type { ToolRendererProps } from "../types";
-import { Icons } from "../Icons";
 import { Badge } from "@/ui/components/ui/badge";
 import { ScrollArea } from "@/ui/components/ui/scroll-area";
+import { SearchResultList } from "../components/ResultList";
+import { tryParseSearchResults } from "../utils";
 
 function extractText(value: unknown): string {
   if (typeof value === "string") return value.trim();
@@ -31,62 +32,97 @@ function extractKeyValues(value: unknown): Array<{ label: string; text: string }
 }
 
 export function TaskRenderer({ status, args, output }: ToolRendererProps) {
-  const name = (args as any)?.name || "";
   const desc = (args as any)?.description || (args as any)?.task || "";
   const subagent = (args as any)?.subagent_type || "";
-  const result = status === "done" ? output : null;
+  
+  // 尝试解析搜索结果 (直接结果或 history 中的结果)
+  let searchResults: Array<{ title: string; url: string; snippet?: string }> = [];
+  
+  if (status === "done") {
+    // 1. 尝试直接解析 output
+    searchResults = tryParseSearchResults(output);
+    
+    // 2. 如果直接解析没有结果，尝试从 history 中提取
+    if (searchResults.length === 0 && output) {
+      try {
+        let history = null;
+        if (typeof output === "object") {
+           // 检查 output 是否包含 history
+           history = (output as any).history;
+        }
+        
+        // 有时候 output 本身就是 history 数组
+        if (!history && Array.isArray(output)) {
+           // 检查元素是否像 history items
+           if (output.some(item => item?.tool || item?.action)) {
+             history = output;
+           }
+        }
+        
+        if (history && Array.isArray(history)) {
+          // 遍历 history 寻找 web_search 的结果
+          for (const item of history) {
+            // 假设 item 结构类似 { tool: "web_search", output: ... }
+            if (item?.tool === "web_search" || item?.action === "web_search") {
+               const itemResults = tryParseSearchResults(item.output || item.result);
+               if (itemResults.length > 0) {
+                 searchResults = searchResults.concat(itemResults);
+               }
+            }
+          }
+        }
+      } catch (e) {
+        // ignore parsing errors
+      }
+    }
+  }
 
-  const resultText = extractText(result);
-  const kvItems = resultText ? [] : extractKeyValues(result);
-  const hasResult = resultText || kvItems.length > 0;
+  const resultText = extractText(output);
+  const kvItems = resultText ? [] : extractKeyValues(output);
+  const hasResult = resultText || kvItems.length > 0 || searchResults.length > 0;
 
   return (
-    <div className="tool-task">
-      <div className="tool-task__header">
-        <Icons.Bolt />
-        <span className="tool-task__title">{name || "子任务分派"}</span>
-      </div>
+    <div className="w-full font-sans text-sm">
       {(desc || subagent) && (
-        <div className="tool-task__meta-row">
+        <div className="flex flex-wrap gap-2 mb-2 items-center">
           {subagent && (
-            <Badge variant="secondary" className="tool-task__badge">
+            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border-zinc-200">
               {subagent}
             </Badge>
           )}
+          {desc && <span className="text-zinc-600">{desc}</span>}
         </div>
       )}
-      {desc && (
-        <div className="tool-section">
-          <div className="tool-section__title">任务说明</div>
-          <ScrollArea className="tool-scroll">
-            <div className="tool-plain">{desc}</div>
-          </ScrollArea>
-        </div>
-      )}
-      {status === "done" && hasResult && (
-        <div className="tool-section">
-          <div className="tool-section__title">执行结果</div>
-          {resultText ? (
-            <ScrollArea className="tool-scroll">
-              <div className="tool-plain">{resultText}</div>
-            </ScrollArea>
-          ) : (
-            <div className="tool-kv">
-              {kvItems.map((item, idx) => (
-                <div key={`${item.label}-${idx}`} className="tool-kv__row">
-                  <div className="tool-kv__key">{item.label}</div>
-                  <div className="tool-kv__value">{item.text}</div>
+      
+      {status === "done" && (
+        <div className="flex flex-col gap-2">
+          {searchResults.length > 0 ? (
+            <SearchResultList results={searchResults} />
+          ) : hasResult ? (
+            resultText ? (
+              <ScrollArea className="tool-scroll">
+                <div className="tool-plain text-zinc-600">
+                  {resultText}
                 </div>
-              ))}
-            </div>
+              </ScrollArea>
+            ) : (
+              <div className="tool-kv">
+                {kvItems.map((item, idx) => (
+                  <div key={`${item.label}-${idx}`} className="tool-kv__row">
+                    <div className="tool-kv__key">{item.label}</div>
+                    <div className="tool-kv__value">{item.text}</div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+             <div className="text-zinc-400 italic">暂无结果</div>
           )}
         </div>
       )}
-      {status === "done" && !hasResult && (
-        <div className="tool-task__hint">暂无结果</div>
-      )}
+      
       {status !== "done" && !desc && (
-        <div className="tool-task__hint">正在执行子任务...</div>
+        <div className="text-zinc-400 italic">正在执行子任务...</div>
       )}
     </div>
   );

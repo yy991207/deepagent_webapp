@@ -75,54 +75,55 @@ export function ToolMessage({
       ? ((endTime - startTime) / 1000).toFixed(2)
       : null;
 
-  // 状态对应的边框样式
-  const statusBorderStyles = {
-    running: "ring-1 ring-blue-200/70",
-    done: "ring-1 ring-black/5",
-    error: "ring-1 ring-red-200/70",
-  };
+  // 移除所有工具的边框
+  const statusBorderStyles = "";
 
   const runningHint =
     status === "running" ? config?.getRunningHint?.(args) : null;
 
   return (
-    <Card
+    <div
       className={cn(
-        "overflow-hidden transition-all py-0 gap-0 rounded-xl",
-        "bg-background/95",
-        "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
-        "hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]",
-        "hover:ring-1 hover:ring-black/10",
-        statusBorderStyles[status]
+        "overflow-hidden transition-all py-0 gap-0",
+        "bg-transparent shadow-none border-0"
       )}
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 py-3 cursor-pointer",
-          "hover:bg-muted/50 transition-colors"
+          "inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all cursor-pointer select-none mb-2",
+           status === "running" 
+             ? "bg-blue-50 border-blue-100 text-blue-700" 
+             : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100",
+           // 错误状态
+           status === "error" && "bg-red-50 border-red-100 text-red-700"
         )}
         onClick={() => setIsOpen((prev) => !prev)}
       >
-        <div className="flex items-center gap-2.5">
-          <StatusIndicator status={status} />
-          <span className="text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          {status === "running" && <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+          {status === "error" && <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+          <span className="text-current opacity-70 scale-90">
             <Icon />
           </span>
-          <span className="font-medium text-sm">{displayName}</span>
+          <span className="font-medium text-xs">{displayName}</span>
         </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
+        
+        <div className="flex items-center gap-1.5 text-current/60 pl-1 border-l border-current/20 ml-1">
           {duration && (
-            <span className="text-xs font-mono">
+            <span className="text-[10px] font-mono leading-none">
               {duration}s
             </span>
           )}
-          <span>{isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
+          <div className="transition-transform duration-200" style={{ transform: isOpen ? 'rotate(-180deg)' : 'rotate(0deg)' }}>
+             <Icons.ChevronDown /> 
+          </div>
         </div>
       </div>
+      
       {isOpen && (
-        <div className="tool-body">
+        <div className={cn("tool-body border-0 p-0 pl-1")}>
           {runningHint ? (
-            <div className="tool-running-hint">{runningHint}</div>
+            <div className="tool-running-hint text-zinc-500 text-xs italic pl-2">{runningHint}</div>
           ) : (
             <Renderer
               status={status}
@@ -135,7 +136,7 @@ export function ToolMessage({
           )}
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
