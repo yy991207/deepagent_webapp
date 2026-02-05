@@ -1,8 +1,9 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { Card } from "@/ui/components/ui/card";
 import { cn } from "@/lib/utils";
 import { getToolConfig } from "./registry";
 import { registerAllRenderers } from "./renderers";
+import { DefaultRenderer } from "./renderers/DefaultRenderer";
 import { Icons } from "./Icons";
 import type { ToolMessageProps, ToolStatus } from "./types";
 
@@ -35,8 +36,10 @@ export function ToolMessage({
   toolName,
   status = "done",
   args,
+  output,
   startTime,
   endTime,
+  metadata,
 }: ToolMessageProps) {
   // 确保渲染器已注册
   useEffect(() => {
@@ -58,10 +61,10 @@ export function ToolMessage({
     return config.defaultExpanded ?? false;
   };
 
-  // 兼容旧逻辑：保留默认展开策略的计算，但不再渲染内容区
-  void getDefaultExpanded;
+  const [isOpen, setIsOpen] = useState<boolean>(() => getDefaultExpanded());
 
   const Icon = config?.icon || Icons.Tool;
+  const Renderer = config?.Renderer || DefaultRenderer;
 
   // 生成显示名称
   const displayName = config?.getDisplayName?.(args) || toolName;
@@ -79,6 +82,9 @@ export function ToolMessage({
     error: "ring-1 ring-red-200/70",
   };
 
+  const runningHint =
+    status === "running" ? config?.getRunningHint?.(args) : null;
+
   return (
     <Card
       className={cn(
@@ -92,9 +98,10 @@ export function ToolMessage({
     >
       <div
         className={cn(
-          "flex items-center justify-between px-4 py-3",
+          "flex items-center justify-between px-4 py-3 cursor-pointer",
           "hover:bg-muted/50 transition-colors"
         )}
+        onClick={() => setIsOpen((prev) => !prev)}
       >
         <div className="flex items-center gap-2.5">
           <StatusIndicator status={status} />
@@ -103,12 +110,31 @@ export function ToolMessage({
           </span>
           <span className="font-medium text-sm">{displayName}</span>
         </div>
-        {duration && (
-          <span className="text-xs text-muted-foreground font-mono">
-            {duration}s
-          </span>
-        )}
+        <div className="flex items-center gap-2 text-muted-foreground">
+          {duration && (
+            <span className="text-xs font-mono">
+              {duration}s
+            </span>
+          )}
+          <span>{isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
+        </div>
       </div>
+      {isOpen && (
+        <div className="tool-body">
+          {runningHint ? (
+            <div className="tool-running-hint">{runningHint}</div>
+          ) : (
+            <Renderer
+              status={status}
+              args={args}
+              output={output}
+              startTime={startTime}
+              endTime={endTime}
+              metadata={metadata}
+            />
+          )}
+        </div>
+      )}
     </Card>
   );
 }

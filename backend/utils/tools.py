@@ -201,3 +201,23 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
         }
     except Exception as e:
         return {"error": f"Fetch URL error: {e!s}", "url": url}
+
+
+def write_todos(
+    todos: list[dict[str, Any]] | None = None,
+    todo_list: list[dict[str, Any]] | None = None,
+    items: list[dict[str, Any]] | None = None,
+    title: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Return todo data for UI rendering."""
+    # 说明：这里仅做数据透传，前端负责具体渲染结构
+    resolved = (
+        todos
+        or todo_list
+        or items
+        or kwargs.get("todoList")
+        or kwargs.get("todo_list")
+        or []
+    )
+    return {"todos": resolved, "title": title or "任务列表"}

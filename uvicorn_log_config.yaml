@@ -36,6 +36,10 @@ loggers:
     handlers: [default]
     level: INFO
     propagate: false
+  backend.services.agent_stream_event_service:
+    handlers: [default]
+    level: DEBUG
+    propagate: false
   deepagents:
     handlers: [default]
     level: INFO

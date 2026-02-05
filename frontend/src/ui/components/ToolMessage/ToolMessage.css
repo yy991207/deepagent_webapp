@@ -695,6 +695,101 @@
   gap: 4px;
 }
 
+.tool-todos__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-todos-group {
+  padding: 10px 12px;
+  border: 1px solid var(--tool-card-border);
+  border-radius: 8px;
+  background: var(--tool-code-bg);
+}
+
+.tool-todos-group__header {
+  margin-bottom: 8px;
+}
+
+.tool-todos-group__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+}
+
+.tool-todos-group__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+.tool-todos-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-subtask {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.tool-subtask__check {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-subtask__check svg {
+  width: 14px;
+  height: 14px;
+  color: var(--tool-status-done);
+}
+
+.tool-subtask__check--done {
+  background: #e8f5e9;
+  border-radius: 50%;
+}
+
+.tool-subtask__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tool-card-border);
+  display: block;
+}
+
+.tool-subtask__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-subtask__title {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.4;
+}
+
+.tool-subtask__title--done {
+  color: var(--tool-text-muted);
+  text-decoration: line-through;
+}
+
+.tool-subtask__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--tool-text-muted);
+  line-height: 1.4;
+}
+
 .tool-todo {
   display: flex;
   align-items: flex-start;
@@ -817,6 +912,64 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+/* 子任务分派渲染器 */
+.tool-task {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-task__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-task__header svg {
+  width: 16px;
+  height: 16px;
+  color: var(--tool-status-running);
+}
+
+.tool-task__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+}
+
+.tool-task__desc {
+  font-size: 13px;
+  color: var(--tool-text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-task__meta {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+.tool-task__result {
+  margin: 0;
+  padding: 10px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tool-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-task__hint {
+  font-size: 12px;
+  color: var(--tool-text-muted);
 }
 
 .tool-fetch__url {

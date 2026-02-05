@@ -9,6 +9,7 @@ import { FileReadRenderer } from "./FileReadRenderer";
 import { FileWriteRenderer } from "./FileWriteRenderer";
 import { DirectoryRenderer } from "./DirectoryRenderer";
 import { FetchUrlRenderer } from "./FetchUrlRenderer";
+import { TaskRenderer } from "./TaskRenderer";
 
 // 导出所有渲染器
 export { DefaultRenderer };
@@ -20,6 +21,7 @@ export { FileReadRenderer };
 export { FileWriteRenderer };
 export { DirectoryRenderer };
 export { FetchUrlRenderer };
+export { TaskRenderer };
 
 // 注册所有工具渲染器
 export function registerAllRenderers(): void {
@@ -62,6 +64,19 @@ export function registerAllRenderers(): void {
     icon: Icons.Task,
     getDisplayName: () => "任务列表",
     defaultExpanded: true,
+  });
+
+  // 子任务分派
+  registerTool({
+    names: ["task"],
+    Renderer: TaskRenderer,
+    icon: Icons.Bolt,
+    getDisplayName: () => "子任务分派",
+    defaultExpanded: true,
+    getRunningHint: (args) => {
+      const name = (args as any)?.name || "";
+      return name ? `正在执行：${name}` : "正在执行子任务...";
+    },
   });
 
   // Shell / Bash 执行

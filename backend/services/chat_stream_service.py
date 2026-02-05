@@ -31,7 +31,7 @@ from backend.config.deepagents_settings import create_model, settings
 from backend.services.checkpointer_provider import get_checkpointer
 from backend.services.rag_service import RagService
 from backend.services.skills_sync_service import SkillsSyncService
-from backend.utils.tools import fetch_url, http_request, web_search
+from backend.utils.tools import fetch_url, http_request, web_search, write_todos
 from backend.prompts.chat_prompts import (
     sandbox_environment_prompt,
     reference_rules_prompt,
@@ -175,7 +175,7 @@ class ChatStreamService:
 
     async def _build_tools(self) -> list[Any]:
         """构建工具列表（含可选 MCP 工具）。"""
-        tools: list[Any] = [http_request, fetch_url]
+        tools: list[Any] = [http_request, fetch_url, write_todos]
         if settings.has_tavily:
             tools.append(web_search)
 

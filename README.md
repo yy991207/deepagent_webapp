@@ -1,9 +1,25 @@
 # DeepAgents Web 应用
  
  这是一个基于 `deepagents` 的精简版 Web 应用：
- - 后端用 FastAPI 提供聊天、文件管理、RAG 检索、播客生成等接口
- - 前端用 Vite + Preact 提供简单的交互界面
- - 数据存储主要依赖 MongoDB（聊天记录、上传文件、播客任务/结果等）
+- 后端用 FastAPI 提供聊天、文件管理、RAG 检索、播客生成等接口
+- 前端用 Vite + React + Tailwind CSS 提供交互界面
+- 数据存储主要依赖 MongoDB（聊天记录、上传文件、播客任务/结果等）
+
+## 技术栈概览
+
+### 后端
+- FastAPI + Uvicorn（Web API）
+- LangChain + LangGraph（对话编排与工具调用）
+- LlamaIndex（RAG 检索与向量索引）
+- MongoDB（聊天记录、素材、播客任务与结果）
+- Celery + Redis（播客生成异步任务）
+- OpenSandbox（远程沙箱执行）
+- MCP（可选，加载外部工具）
+
+### 前端
+- React 18 + Vite 5
+- Tailwind CSS 4 + tailwind-merge
+- Radix UI + lucide-react
  
  ## 你能用它做什么
  - 聊天对话（支持流式输出）
@@ -105,32 +121,38 @@
  后端启动时会在 `backend/api/web_app.py` 里执行 `load_dotenv()`，所以把配置写到项目根目录的 `.env` 即可。
  
  ### 必配（跑起来必须要的）
- - `MONGODB_URI`
- - `DEEPAGENTS_MONGO_DB`
- - `OPENAI_API_KEY`
- - `OPENAI_BASE_URL`（如果你走 OpenAI 兼容接口，比如通义千问兼容模式）
- - `OPENAI_MODEL`
+- `MONGODB_URI`
+- `DEEPAGENTS_MONGO_DB`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`（如果你走 OpenAI 兼容接口，比如通义千问兼容模式）
+- `OPENAI_MODEL`
+
+### MongoDB（可选补充）
+- `DEEPAGENTS_MONGO_URL`：Celery/播客链路读取 MongoDB 的兜底配置（默认走 `MONGODB_URI`）
  
  示例：
  ```bash
  # MongoDB
  MONGODB_URI=mongodb://127.0.0.1:27017
  DEEPAGENTS_MONGO_DB=deepagents_web
+ DEEPAGENTS_MONGO_URL=mongodb://127.0.0.1:27017/deepagents_web
  
  # LLM（OpenAI 兼容接口）
- OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
- OPENAI_API_KEY=你的key
- OPENAI_MODEL=qwen-turbo
- OPENAI_TEMPERATURE=0.7
+OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+OPENAI_API_BASE=https://api.openai.com/v1
+OPENAI_API_KEY=你的key
+OPENAI_MODEL=qwen-turbo
+OPENAI_TEMPERATURE=0.7
  ```
  
  ### 可选（用到对应能力再配）
  - `TAVILY_API_KEY`：开启联网搜索工具
  
  ### RAG 相关（可选）
- - `RAG_ENABLED`：是否启用（默认按代码逻辑）
- - `RAG_TOP_K`：召回条数
- - `RAG_PROVIDER`：embedding 提供商（dashscope/openai/huggingface 等，按你代码支持为准）
+ - `RAG_EMBEDDING_PROVIDER`：embedding 提供商（`dashscope`/`openai`/`hf`）
+ - `RAG_DASHSCOPE_EMBEDDING_MODEL`：DashScope embedding 模型（默认 `text-embedding-v2`）
+ - `RAG_HF_EMBEDDING_MODEL`：HuggingFace embedding 模型（默认 `BAAI/bge-small-zh-v1.5`）
+ - `OPENAI_EMBEDDING_MODEL`：OpenAI embedding 模型（默认 `text-embedding-3-small`）
  
  ### 播客相关（可选）
  - `DEEPAGENTS_DATA_DIR`：数据目录（播客音频存放位置）
@@ -147,6 +169,20 @@
  - `PODCAST_TTS_MODEL`：TTS 模型（dashscope 时为 `qwen3-tts-flash-realtime`）
  - `OPENAI_COMPATIBLE_BASE_URL`：OpenAI 兼容接口地址（播客 LLM 使用）
  - `OPENAI_COMPATIBLE_API_KEY`：OpenAI 兼容接口密钥
+
+ ### 模型分流（可选）
+ - `ROUTER_LLM_ENABLED`：是否启用分流（`1/true/yes/on`）
+ - `ROUTER_LLM_MODEL`：分流模型名（默认 `qwen-flash`）
+ - `ROUTER_LLM_FLASH_MODEL`：主模型 flash 档
+ - `ROUTER_LLM_PLUS_MODEL`：主模型 plus 档
+ - `ROUTER_LLM_MAX_MODEL`：主模型 max 档
+ - `ROUTER_LLM_TEMPERATURE`：分流温度（默认 0.1）
+ - `ROUTER_LLM_PROMPT`：分流提示词（可用 `\n` 代表换行）
+
+ ### 聊天记忆压缩（可选）
+ - `DEEPAGENTS_CHAT_MEMORY_MAX_CHARS`：触发总结的字数阈值（默认 5000）
+ - `DEEPAGENTS_CHAT_MEMORY_SUMMARY_MAX_CHARS`：总结输出最大字数（默认 500）
+ - `DEEPAGENTS_CHAT_MEMORY_SUMMARY_LOCK_TTL_SECONDS`：总结锁 TTL（默认 120 秒）
 
 #### Edge TTS 音色配置（PODCAST_TTS_PROVIDER=edge 时）
 - `PODCAST_EDGE_TTS_VOICE_DEFAULT`：默认音色（默认 `zh-CN-XiaoxiaoNeural`）
@@ -205,7 +241,7 @@
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | 后端 (backend) | 7777 | FastAPI 主服务 |
-| 前端 (frontend) | 5173 | Vite + Preact 开发服务器 |
+| 前端 (frontend) | 5173 | Vite + React 开发服务器 |
 | Celery Worker | - | 任务队列工作进程 |
 | Celery Beat | - | 定时任务调度器 |
 | Podcast Agent | 8888 | 播客生成执行服务 |
@@ -266,12 +302,15 @@ CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 
 # Worker 配置
-CELERY_CONCURRENCY=4             # Worker 并发数（默认 4）
-CELERY_LOG_LEVEL=info            # 日志级别（默认 info）
+CELERY_WORKER_CONCURRENCY=4      # Worker 并发数（默认 4）
+CELERY_WORKER_PREFETCH_MULTIPLIER=1 # Worker 预取数（默认 1）
 CELERY_TASK_TIME_LIMIT=1800      # 任务硬超时秒数（默认 30 分钟）
 CELERY_TASK_SOFT_TIME_LIMIT=1500 # 任务软超时秒数（默认 25 分钟）
+CELERY_RESULT_EXPIRES=3600       # 结果过期时间（默认 1 小时）
+CELERY_TIMEZONE=Asia/Shanghai    # 时区（默认 Asia/Shanghai）
 
 # Podcast Agent 配置
+PODCAST_AGENT_HOST=0.0.0.0       # 服务地址（默认 0.0.0.0）
 PODCAST_AGENT_PORT=8888          # 服务端口（默认 8888）
 ```
 
