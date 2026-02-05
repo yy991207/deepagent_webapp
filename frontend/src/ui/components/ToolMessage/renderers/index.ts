@@ -10,6 +10,8 @@ import { FileWriteRenderer } from "./FileWriteRenderer";
 import { DirectoryRenderer } from "./DirectoryRenderer";
 import { FetchUrlRenderer } from "./FetchUrlRenderer";
 import { TaskRenderer } from "./TaskRenderer";
+import { HttpRequestRenderer } from "./HttpRequestRenderer";
+import { GrepRenderer } from "./GrepRenderer";
 
 // 导出所有渲染器
 export { DefaultRenderer };
@@ -22,6 +24,8 @@ export { FileWriteRenderer };
 export { DirectoryRenderer };
 export { FetchUrlRenderer };
 export { TaskRenderer };
+export { HttpRequestRenderer };
+export { GrepRenderer };
 
 // 注册所有工具渲染器
 export function registerAllRenderers(): void {
@@ -66,19 +70,6 @@ export function registerAllRenderers(): void {
     defaultExpanded: true,
   });
 
-  // 子任务分派
-  registerTool({
-    names: ["task"],
-    Renderer: TaskRenderer,
-    icon: Icons.Bolt,
-    getDisplayName: () => "子任务分派",
-    defaultExpanded: true,
-    getRunningHint: (args) => {
-      const name = (args as any)?.name || "";
-      return name ? `正在执行：${name}` : "正在执行子任务...";
-    },
-  });
-
   // Shell / Bash 执行
   registerTool({
     names: ["shell", "bash", "execute_command", "run_command"],
@@ -121,7 +112,7 @@ export function registerAllRenderers(): void {
   // 文件编辑
   registerTool({
     names: ["edit_file", "replace_file_content", "modify_file"],
-    Renderer: DefaultRenderer, // 后续替换为 FileEditRenderer
+    Renderer: FileWriteRenderer,
     icon: Icons.Edit,
     getDisplayName: (args) => {
       const path = (args as any)?.TargetFile || (args as any)?.file_path || (args as any)?.path || "";
@@ -134,7 +125,7 @@ export function registerAllRenderers(): void {
   // HTTP 请求
   registerTool({
     names: ["http_request", "fetch", "curl"],
-    Renderer: DefaultRenderer, // 后续替换为 HttpRequestRenderer
+    Renderer: HttpRequestRenderer,
     icon: Icons.Http,
     getDisplayName: (args) => {
       const url = (args as any)?.url || "";
@@ -182,7 +173,7 @@ export function registerAllRenderers(): void {
   // 搜索/Grep
   registerTool({
     names: ["grep", "grep_search", "glob", "find_files"],
-    Renderer: DefaultRenderer, // 后续替换为 GrepRenderer
+    Renderer: GrepRenderer,
     icon: Icons.Search,
     getDisplayName: (args) => {
       const query = (args as any)?.Query || (args as any)?.Pattern || (args as any)?.pattern || "";
@@ -193,12 +184,17 @@ export function registerAllRenderers(): void {
   // 子任务分派
   registerTool({
     names: ["task", "subtask", "delegate"],
-    Renderer: DefaultRenderer, // 后续替换为 TaskRenderer
+    Renderer: TaskRenderer,
     icon: Icons.Bolt,
     getDisplayName: (args) => {
       const name = (args as any)?.name || (args as any)?.description || "";
       const shortName = name.length > 30 ? name.slice(0, 30) + "..." : name;
       return shortName ? `子任务: ${shortName}` : "子任务分派";
+    },
+    defaultExpanded: true,
+    getRunningHint: (args) => {
+      const name = (args as any)?.name || (args as any)?.description || "";
+      return name ? `正在执行：${name}` : "正在执行子任务...";
     },
   });
 

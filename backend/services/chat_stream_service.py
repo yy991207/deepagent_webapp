@@ -192,7 +192,42 @@ class ChatStreamService:
                 "MCP tools load skipped | err=%s",
                 str(_mcp_exc),
             )
+        # 关键逻辑：兼容 LLM 误把工具名重复输出（如 web_searchweb_search）
+        tools.extend(self._build_tool_aliases(tools))
         return tools
+
+    def _build_tool_aliases(self, tools: list[Any]) -> list[Any]:
+        """生成工具名重复拼接的别名，降低 not a valid tool 频率。"""
+        aliases: list[Any] = []
+        seen: set[str] = set()
+        for t in tools:
+            name = getattr(t, "name", None)
+            if not name and callable(t):
+                name = getattr(t, "__name__", None)
+            if not name or not callable(t):
+                continue
+
+            base_name = str(name)
+            if base_name in seen:
+                continue
+            seen.add(base_name)
+
+            alias_name = f"{base_name}{base_name}"
+            if alias_name in seen:
+                continue
+            seen.add(alias_name)
+
+            # 说明：这里只做重复名别名，不处理其它拼写错误
+            def _alias(*args: Any, _tool: Any = t, **kwargs: Any) -> Any:
+                return _tool(*args, **kwargs)
+
+            try:
+                _alias.__name__ = alias_name
+                _alias.__doc__ = getattr(t, "__doc__", None)
+            except Exception:
+                pass
+            aliases.append(_alias)
+        return aliases
 
     async def _handle_stream_error(
         self,

@@ -40,6 +40,10 @@ export function WebSearchRenderer({ status, args, output }: ToolRendererProps) {
     // 非 JSON 格式
   }
 
+  if (results.length === 0 && typeof output === "string") {
+    results = parsePlainTextResults(output);
+  }
+
   return (
     <div className="tool-search">
       <div className="tool-search__query">
@@ -60,4 +64,37 @@ export function WebSearchRenderer({ status, args, output }: ToolRendererProps) {
       )}
     </div>
   );
+}
+
+function parsePlainTextResults(text: string): Array<{ title: string; url: string }> {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const results: Array<{ title: string; url: string }> = [];
+  let pendingTitle: string | null = null;
+
+  for (const line of lines) {
+    const urlMatch = line.match(/https?:\/\/\S+/i);
+    if (urlMatch) {
+      const url = urlMatch[0];
+      const title = line.replace(url, "").trim() || pendingTitle || url;
+      results.push({ title, url });
+      pendingTitle = null;
+      continue;
+    }
+
+    // 形如 "标题 - https://..."
+    const splitMatch = line.match(/(.+?)\s+(https?:\/\/\S+)/i);
+    if (splitMatch) {
+      results.push({ title: splitMatch[1].trim(), url: splitMatch[2] });
+      pendingTitle = null;
+      continue;
+    }
+
+    pendingTitle = line;
+  }
+
+  return results;
 }

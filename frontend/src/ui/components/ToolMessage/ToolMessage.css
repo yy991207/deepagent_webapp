@@ -190,6 +190,74 @@
   word-break: break-word;
 }
 
+/* 通用内容块（OpenAI 风格） */
+.tool-default {
+  padding: 12px 16px;
+}
+
+.tool-plain {
+  padding: 10px 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tool-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  line-height: 1.6;
+}
+
+.tool-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-kv__row {
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--tool-code-bg);
+  border: 1px solid var(--tool-code-border);
+  border-radius: 8px;
+}
+
+.tool-kv__key {
+  min-width: 90px;
+  font-size: 12px;
+  color: var(--tool-text-muted);
+  flex-shrink: 0;
+}
+
+.tool-kv__value {
+  font-size: 13px;
+  color: var(--tool-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* 代码块组件 */
 .tool-code-block {
   margin: 0;
@@ -912,6 +980,64 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+/* HTTP 请求渲染器 */
+.tool-http {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-http__request {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.tool-http__method {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #1e3a8a;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tool-http__url {
+  color: var(--tool-text-primary);
+  word-break: break-word;
+}
+
+.tool-http__status {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+.tool-http__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-http__section-title {
+  font-size: 12px;
+  color: var(--tool-text-muted);
+}
+
+/* Grep 渲染器 */
+.tool-grep {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-grep__meta {
+  font-size: 12px;
+  color: var(--tool-text-muted);
 }
 
 /* 子任务分派渲染器 */
