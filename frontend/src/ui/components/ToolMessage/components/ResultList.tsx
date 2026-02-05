@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 export interface ResultListItem {
   id?: string;
@@ -88,6 +88,45 @@ export interface SearchResult {
   snippet?: string;
 }
 
+function Favicon({ url }: { url: string }) {
+  const [error, setError] = useState(false);
+
+  const getFaviconUrl = (u: string) => {
+    try {
+      const domain = new URL(u).hostname;
+      return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+    } catch {
+      return "";
+    }
+  };
+
+  if (error) {
+    return (
+      <svg 
+        width="10" 
+        height="10" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="currentColor" 
+        strokeWidth="2"
+        className="text-muted-foreground"
+      >
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    );
+  }
+
+  return (
+    <img
+      src={getFaviconUrl(url)}
+      alt=""
+      className="w-full h-full object-cover"
+      onError={() => setError(true)}
+    />
+  );
+}
+
 export function SearchResultList({
   results,
   onResultClick,
@@ -95,12 +134,22 @@ export function SearchResultList({
   results: SearchResult[];
   onResultClick?: (result: SearchResult) => void;
 }) {
+  const getDomain = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "";
+    }
+  };
+
   return (
-    <div className="tool-search__results">
-      {results.map((result, idx) => (
-        <div key={idx} className="tool-search__result">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-1">
+      {results.map((result, idx) => {
+        const domain = getDomain(result.url);
+        
+        return (
           <a
-            className="tool-search__result-title"
+            key={idx}
             href={result.url}
             target="_blank"
             rel="noopener noreferrer"
@@ -110,15 +159,29 @@ export function SearchResultList({
                 onResultClick(result);
               }
             }}
+            className="flex flex-col p-3 rounded-xl border bg-card hover:bg-accent/50 transition-colors group text-left no-underline h-full shadow-sm"
           >
-            {result.title}
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 border border-border/50">
+                <Favicon url={result.url} />
+              </div>
+              <span className="text-xs text-muted-foreground font-medium truncate">
+                {domain}
+              </span>
+            </div>
+            
+            <div className="font-medium text-sm text-card-foreground leading-snug mb-1.5 line-clamp-2 group-hover:text-primary transition-colors">
+              {result.title}
+            </div>
+            
+            {result.snippet && (
+              <div className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mt-auto">
+                {result.snippet}
+              </div>
+            )}
           </a>
-          <div className="tool-search__result-url">{result.url}</div>
-          {result.snippet && (
-            <div className="tool-search__result-snippet">{result.snippet}</div>
-          )}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

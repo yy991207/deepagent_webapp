@@ -76,27 +76,46 @@ function parsePlainTextResults(text: string): Array<{ title: string; url: string
     .filter(Boolean);
 
   const results: Array<{ title: string; url: string }> = [];
-  let pendingTitle: string | null = null;
+  let pendingLines: string[] = [];
 
   for (const line of lines) {
     const urlMatch = line.match(/https?:\/\/\S+/i);
+    
+    // 如果这一行包含 URL
     if (urlMatch) {
       const url = urlMatch[0];
-      const title = line.replace(url, "").trim() || pendingTitle || url;
+      
+      // 检查是否是 "Title - URL" 这种格式
+      const textWithoutUrl = line.replace(url, "").trim();
+      
+      let title = "";
+      
+      if (textWithoutUrl.length > 0) {
+        // 如果同一行还有其他文本，优先作为标题
+        title = textWithoutUrl;
+        // 之前的 pendingLines 可能是上一条的孤儿文本，或者这一条的描述
+        // 这里简单起见，如果 pendingLines 存在，我们把它们丢弃或者作为上一条的结果（如果没有URL的话很难办）
+        // 实际上在 Google 搜索结果文本中，通常是 Title \n URL \n Snippet 或者 Title \n URL
+        // 或者 Title \n Snippet \n URL
+        pendingLines = []; 
+      } else if (pendingLines.length > 0) {
+        // 使用之前的行作为标题
+        title = pendingLines.join(" ");
+        pendingLines = [];
+      } else {
+        // 没有标题，使用 URL
+        title = url;
+      }
+      
+      // 清理标题中的特殊字符
+      title = title.replace(/^-\s*/, "").replace(/^-/, "").trim();
+      
       results.push({ title, url });
-      pendingTitle = null;
       continue;
     }
 
-    // 形如 "标题 - https://..."
-    const splitMatch = line.match(/(.+?)\s+(https?:\/\/\S+)/i);
-    if (splitMatch) {
-      results.push({ title: splitMatch[1].trim(), url: splitMatch[2] });
-      pendingTitle = null;
-      continue;
-    }
-
-    pendingTitle = line;
+    // 不包含 URL，存入 pendingLines
+    pendingLines.push(line);
   }
 
   return results;

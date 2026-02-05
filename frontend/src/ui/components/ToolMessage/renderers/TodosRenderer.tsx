@@ -3,7 +3,7 @@ import { TodoList, type TodoItem } from "../components/TodoList";
 import { Icons } from "../Icons";
 import { cn } from "@/lib/utils";
 
-export function TodosRenderer({ status, args, output }: ToolRendererProps) {
+export function TodosRenderer({ status, args, output, startTime, endTime }: ToolRendererProps) {
   // 从参数或输出中获取任务列表
   const data = status === "running" ? args : output;
   let items: TodoItem[] = [];
@@ -23,6 +23,73 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
       todoData = (data as any).todos;
     } else if ((data as any)?.items) {
       todoData = (data as any).items;
+    }
+    
+    // 如果不是数组且是字符串，尝试从字符串中提取 JSON 数组
+    if (!Array.isArray(todoData) && typeof data === "string") {
+      // 策略：找到可能的列表起始位置，尝试解析
+      // 优先找 "todo_list" 关键词后面的 [
+      const kwIndex = data.indexOf("todo_list");
+      let start = -1;
+      
+      if (kwIndex !== -1) {
+        start = data.indexOf('[', kwIndex);
+      }
+      
+      // 如果没找到或没有关键词，找第一个 [
+      if (start === -1) {
+        start = data.indexOf('[');
+      }
+      
+      if (start !== -1) {
+        // 尝试从最右边的 ] 开始匹配，以处理嵌套列表
+        let end = data.lastIndexOf(']');
+        
+        // 如果最宽的匹配失败，且存在多个 ]，可以尝试逐步向左收缩（简单的回退策略）
+        // 这里暂时只尝试最宽匹配，因为它能处理最常见的嵌套情况
+        if (end > start) {
+           const potentialJson = data.substring(start, end + 1);
+           try {
+             const fixedJson = potentialJson
+               .replace(/False/g, 'false')
+               .replace(/True/g, 'true')
+               .replace(/None/g, 'null')
+               .replace(/'/g, '"'); 
+             const parsed = JSON.parse(fixedJson);
+             if (Array.isArray(parsed)) todoData = parsed;
+           } catch {
+             // 如果最宽匹配失败，可能是因为包含了多个不相关的列表
+             // 比如: ... todo_list: [...], other: [...] ...
+             // 这种情况下，lastIndexOf(']') 会包括 other: [...]，导致 parse 失败
+             // 简单的处理：尝试找到与 start 对应层级的结束 ] (需要堆栈计数)
+             try {
+                let balance = 0;
+                let foundEnd = -1;
+                for (let i = start; i < data.length; i++) {
+                    if (data[i] === '[') balance++;
+                    else if (data[i] === ']') {
+                        balance--;
+                        if (balance === 0) {
+                            foundEnd = i;
+                            break;
+                        }
+                    }
+                }
+                
+                if (foundEnd !== -1) {
+                    const exactJson = data.substring(start, foundEnd + 1);
+                     const fixedJson = exactJson
+                       .replace(/False/g, 'false')
+                       .replace(/True/g, 'true')
+                       .replace(/None/g, 'null')
+                       .replace(/'/g, '"');
+                    const parsed = JSON.parse(fixedJson);
+                    if (Array.isArray(parsed)) todoData = parsed;
+                }
+             } catch {}
+           }
+        }
+      }
     }
     
     if (Array.isArray(todoData)) {
@@ -87,6 +154,13 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
   }
 
   const hasGroups = groups.length > 0;
+  
+  // Calculate duration string
+  const durationString =
+    startTime && endTime
+      ? ((endTime - startTime) / 1000).toFixed(1) + "s"
+      : undefined;
+
   if (!hasGroups && items.length === 0) {
     return (
       <div className="tool-todos">
@@ -96,6 +170,12 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
   }
 
   if (hasGroups) {
+    // For now, render groups using the legacy style but wrapped in similar container if needed
+    // Or we could try to adapt the new style to groups later. 
+    // Given the request specifically showed a flat list, we'll keep the groups as is for safety,
+    // but maybe update the header to be consistent if requested.
+    // However, let's inject the StatusIcon style into the groups if possible or just leave them.
+    // The user request was "todolist reference this design", implying the TodoList component.
     const totalCount = groups.reduce((sum, group) => sum + group.items.length, 0);
     const completedCount = groups.reduce(
       (sum, group) => sum + group.items.filter((item) => item.status === "completed").length,
@@ -106,7 +186,7 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
       <div className="tool-todos">
         <div className="tool-todos__header">
           <Icons.Task />
-          <span className="tool-todos__title">任务列表</span>
+          <span className="tool-todos__title">Task Lists</span>
           <span className="tool-todos__count">
             {completedCount}/{totalCount}
           </span>
@@ -157,7 +237,7 @@ export function TodosRenderer({ status, args, output }: ToolRendererProps) {
     );
   }
 
-  return <TodoList items={items} />;
+  return <TodoList items={items} status={status} duration={durationString} />;
 }
 
 function normalizeStatus(status: string | undefined): TodoItem["status"] {
