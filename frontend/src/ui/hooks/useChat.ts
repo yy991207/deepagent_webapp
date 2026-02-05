@@ -42,6 +42,29 @@ export function useChat(sessionId: string, selectedList: string[], selectedAttac
   const pendingAssistantIdRef = useRef<string | null>(null);
   const pendingRefsRef = useRef<RagReference[] | null>(null);
 
+  const resetStreamState = () => {
+    assistantBufferRef.current = { id: "", text: "" };
+    pendingAssistantIdRef.current = null;
+    pendingRefsRef.current = null;
+  };
+
+  const cancelActiveStream = async () => {
+    // 没有正在进行的流式请求就不触发取消，避免误伤
+    if (!abortControllerRef.current) return;
+    // 先终止前端 SSE 请求，再通知后端中断对应会话的流式生成
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    resetStreamState();
+    setStatus("就绪");
+    const sid = String(sessionId || "").trim();
+    if (!sid) return;
+    try {
+      await fetch(`/api/chat/session/${encodeURIComponent(sid)}/cancel`, { method: "POST" });
+    } catch {
+      // ignore
+    }
+  };
+
   const handleSocketPayload = (payload: SocketPayload) => {
     if (payload.type === "rag.references") {
       pendingRefsRef.current = payload.references || [];
@@ -127,9 +150,7 @@ export function useChat(sessionId: string, selectedList: string[], selectedAttac
       }
       if (payload.status === "done") {
         setStatus("就绪");
-        assistantBufferRef.current = { id: "", text: "" };
-        pendingAssistantIdRef.current = null;
-        pendingRefsRef.current = null;
+        resetStreamState();
       }
       return;
     }
@@ -152,6 +173,7 @@ export function useChat(sessionId: string, selectedList: string[], selectedAttac
     if (!trimmed) {
       return;
     }
+    await cancelActiveStream();
     const attachments = selectedAttachmentNames;
     const pendingAssistantId = createId();
     pendingAssistantIdRef.current = pendingAssistantId;
@@ -224,7 +246,7 @@ export function useChat(sessionId: string, selectedList: string[], selectedAttac
   };
 
   const abort = () => {
-    abortControllerRef.current?.abort();
+    void cancelActiveStream();
   };
 
   return {

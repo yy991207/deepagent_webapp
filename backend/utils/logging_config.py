@@ -55,5 +55,7 @@ def get_uvicorn_log_config():
             "uvicorn": {"handlers": ["default"], "level": "INFO"},
             "uvicorn.error": {"level": "INFO"},
             "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+            # 减少 httpx 请求日志噪声，保留 warning+ 便于排障
+            "httpx": {"handlers": ["default"], "level": "WARNING", "propagate": False},
         },
     }

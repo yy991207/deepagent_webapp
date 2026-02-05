@@ -46,7 +46,7 @@ loggers:
     propagate: false
   httpx:
     handlers: [default]
-    level: INFO
+    level: WARNING
     propagate: false
   httpcore:
     handlers: [default]

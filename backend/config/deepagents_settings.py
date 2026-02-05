@@ -68,3 +68,19 @@ def create_model(model_name: str | None = None) -> BaseChatModel:
         model=resolved_model,
         temperature=temperature,
     )
+
+
+def create_router_model(model_name: str | None = None) -> BaseChatModel:
+    """创建路由 LLM 实例（默认低温度，保证稳定分流）。"""
+
+    resolved_model = model_name or os.environ.get("ROUTER_LLM_MODEL") or os.environ.get("OPENAI_MODEL") or "qwen-flash"
+    base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("OPENAI_API_BASE")
+    temperature_raw = os.environ.get("ROUTER_LLM_TEMPERATURE")
+    temperature = float(temperature_raw) if temperature_raw else 0.1
+
+    return ChatOpenAI(
+        api_key=settings.openai_api_key,
+        base_url=base_url,
+        model=resolved_model,
+        temperature=temperature,
+    )

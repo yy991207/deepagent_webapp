@@ -158,6 +158,7 @@ const Icons = {
   ),
   Search: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>,
   Send: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>,
+  Stop: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>,
   Share: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92zm-9.52 2h9.52c-.13 1.74-.52 3.42-1.06 5h-7.4c-.54-1.58-.93-3.26-1.06-5z"/></svg>,
   Settings: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>,
   Apps: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>,
@@ -561,6 +562,29 @@ function App() {
   const [refModalFileLoading, setRefModalFileLoading] = useState(false);
 
   const selectedList = useMemo(() => Array.from(selectedFiles), [selectedFiles]);
+  const isStreaming = status === "思考中...";
+
+  const resetStreamState = () => {
+    assistantBufferRef.current = { id: "", text: "" };
+    pendingAssistantIdRef.current = null;
+    pendingRefsRef.current = null;
+  };
+
+  const cancelActiveStream = async (sid: string) => {
+    // 没有正在进行的流式请求就不触发取消，避免误伤
+    if (!abortControllerRef.current) return;
+    // 先终止前端 SSE 请求，再通知后端中断对应会话的流式生成
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    resetStreamState();
+    const session = String(sid || "").trim();
+    if (!session) return;
+    try {
+      await fetch(`/api/chat/session/${encodeURIComponent(session)}/cancel`, { method: "POST" });
+    } catch {
+      // ignore
+    }
+  };
 
   const selectedAttachmentNames = useMemo(() => {
     const map = new Map(sources.map((s) => [s.id, s.filename] as const));
@@ -740,14 +764,10 @@ function App() {
     const next = String(sid || "").trim();
     if (!next) return;
     // 切换会话时终止当前 SSE 请求
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    await cancelActiveStream(sessionId);
     currentSessionIdRef.current = next;
     setSessionId(next);
     setStatus("就绪");
-    assistantBufferRef.current = { id: "", text: "" };
-    pendingAssistantIdRef.current = null;
-    pendingRefsRef.current = null;
     try {
       localStorage.setItem("deepagents_session_id", next);
     } catch {
@@ -767,12 +787,8 @@ function App() {
 
     // 删除当前会话时终止正在进行的 SSE 请求
     if (sid === sessionId) {
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = null;
+      await cancelActiveStream(sessionId);
       setStatus("就绪");
-      assistantBufferRef.current = { id: "", text: "" };
-      pendingAssistantIdRef.current = null;
-      pendingRefsRef.current = null;
     }
 
     const resp = await fetch(`/api/chat/session/${encodeURIComponent(sid)}?assistant_id=agent`, {
@@ -1771,6 +1787,7 @@ function App() {
     if (!trimmed) {
       return;
     }
+    await cancelActiveStream(sessionId);
     // 确保 currentSessionIdRef 和当前 sessionId 同步，避免 SSE 事件被过滤
     currentSessionIdRef.current = sessionId;
     
@@ -2492,6 +2509,18 @@ function App() {
                   <button type="button" className="input-action-btn" title="语音">
                     <Icons.Mic />
                   </button>
+                  {isStreaming ? (
+                    <button
+                      className="send-btn"
+                      title="停止生成"
+                      onClick={() => {
+                        void cancelActiveStream(sessionId);
+                        setStatus("就绪");
+                      }}
+                    >
+                      <Icons.Stop />
+                    </button>
+                  ) : null}
                   <button className="send-btn" onClick={sendMessage} disabled={!input.trim()}>
                     <Icons.Send />
                   </button>

@@ -13,11 +13,14 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import logging
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
+import httpx
+import openai
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.subagents import SubAgent
@@ -44,6 +47,7 @@ from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.mcp_tool_service import get_mcp_tool_service
 from backend.services.session_cancel_service import get_session_cancel_service
+from backend.services.model_router_service import ModelRouterService
 
 
 logger = logging.getLogger(__name__)
@@ -199,9 +203,30 @@ class ChatStreamService:
 
         # 使用 LangGraph checkpointer 进行会话状态持久化
         async with get_checkpointer() as checkpointer:
+            # 关键逻辑：分流 LLM 是异步调用，必须在当前事件循环内 await，避免跨线程复用异步对象
+            selected_model_name = None
+            try:
+                router_service = ModelRouterService()
+                decision = await router_service.route_model(
+                    user_text=str(text),
+                    has_attachments=bool(attachments_meta),
+                    has_rag=bool(rag_references),
+                    files_count=len(file_refs or []),
+                )
+                selected_model_name = decision.model_name
+                logger.info(
+                    "router decision | thread_id=%s | route=%s | model=%s | reason=%s",
+                    thread_id,
+                    decision.route,
+                    decision.model_name,
+                    decision.reason,
+                )
+            except Exception as exc:
+                logger.info("router decision failed | thread_id=%s | err=%s", thread_id, str(exc))
+
             # 初始化模型（如果失败则推送错误事件并结束流）
             try:
-                model = create_model()
+                model = create_model(model_name=selected_model_name)
             except Exception as e:
                 err_msg = f"模型初始化失败：{type(e).__name__}: {e}"
                 logger.exception(err_msg)
@@ -451,39 +476,83 @@ class ChatStreamService:
 
             # 获取会话取消服务，用于支持中断流式生成
             cancel_service = get_session_cancel_service()
+            cancel_version = cancel_service.get_version(thread_id)
             
             # 开始流式处理 agent 输出
+            # 说明：部分模型供应方偶发会主动断开连接，导致 httpx 报 incomplete chunked read
+            # 这里在“尚未输出任何内容”时允许快速重试一次，避免用户空响应
+            max_stream_retries = 1
+            max_rate_retries = 2
+            retry_count = 0
+            rate_retry_count = 0
             try:
-                async for chunk in agent.astream(
-                    stream_input,
-                    stream_mode=["messages"],
-                    subgraphs=True,
-                    config={"configurable": {"thread_id": thread_id}},
-                ):
-                    # 检测会话是否已被取消，如果是则中断流式生成
-                    if cancel_service.is_cancelled(thread_id):
-                        logger.info(f"会话已取消，中断流式生成: session_id={thread_id}")
-                        yield {"type": "session.status", "status": "cancelled"}
+                while True:
+                    try:
+                        async for chunk in agent.astream(
+                            stream_input,
+                            stream_mode=["messages"],
+                            subgraphs=True,
+                            config={"configurable": {"thread_id": thread_id}},
+                        ):
+                            # 检测会话是否已被取消，如果是则中断流式生成
+                            if cancel_service.is_cancelled(thread_id, cancel_version):
+                                logger.info(f"会话已取消，中断流式生成: session_id={thread_id}")
+                                yield {"type": "session.status", "status": "cancelled"}
+                                break
+
+                            parsed = stream_event_service.parse_chunk(
+                                chunk=chunk,
+                                state=stream_state,
+                                thread_id=thread_id,
+                                assistant_id=assistant_id,
+                                current_message_id=current_message_id,
+                                rag_references_out=rag_references,
+                            )
+                            for ev in parsed.events:
+                                yield ev
+                            for delta in parsed.assistant_deltas:
+                                assistant_accum.append(str(delta))
                         break
-                    
-                    parsed = stream_event_service.parse_chunk(
-                        chunk=chunk,
-                        state=stream_state,
-                        thread_id=thread_id,
-                        assistant_id=assistant_id,
-                        current_message_id=current_message_id,
-                        rag_references_out=rag_references,
-                    )
-                    for ev in parsed.events:
-                        yield ev
-                    for delta in parsed.assistant_deltas:
-                        assistant_accum.append(str(delta))
-
-            except Exception as exc:
-                err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
-                logger.exception(err_msg)
-                yield {"type": "error", "message": err_msg}
-
+                    except openai.APIError as exc:
+                        # 说明：供应方限流导致请求被拒绝，做指数退避重试
+                        err_text = str(exc)
+                        is_rate_limited = "rate increased too quickly" in err_text.lower()
+                        if is_rate_limited and rate_retry_count < max_rate_retries and not assistant_accum:
+                            rate_retry_count += 1
+                            backoff_seconds = 0.5 * (2 ** (rate_retry_count - 1))
+                            logger.warning(
+                                "rate limited, backing off | thread_id=%s | retry=%s | sleep=%.2fs",
+                                thread_id,
+                                rate_retry_count,
+                                backoff_seconds,
+                            )
+                            await asyncio.sleep(backoff_seconds)
+                            continue
+                        err_msg = f"模型请求被限流：{type(exc).__name__}: {exc}"
+                        logger.exception(err_msg)
+                        yield {"type": "error", "message": err_msg}
+                        break
+                    except httpx.RemoteProtocolError as exc:
+                        # 只有在还没输出任何内容时才重试，避免前端拿到“半截回复”
+                        if retry_count < max_stream_retries and not assistant_accum:
+                            retry_count += 1
+                            stream_state = stream_event_service.init_state()
+                            logger.warning(
+                                "stream interrupted, retrying | thread_id=%s | retry=%s | err=%s",
+                                thread_id,
+                                retry_count,
+                                str(exc),
+                            )
+                            continue
+                        err_msg = f"模型流式连接被提前关闭：{type(exc).__name__}: {exc}"
+                        logger.exception(err_msg)
+                        yield {"type": "error", "message": err_msg}
+                        break
+                    except Exception as exc:
+                        err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
+                        logger.exception(err_msg)
+                        yield {"type": "error", "message": err_msg}
+                        break
             finally:
                 logger.debug(
                     f"stream_chat finalize | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)} | assistant_chars={len(''.join(assistant_accum))}"
