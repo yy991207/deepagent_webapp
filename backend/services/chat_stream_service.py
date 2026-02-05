@@ -71,6 +71,180 @@ class ChatStreamService:
         self._sandbox_root = Path("/workspace")
         logger.info("OpenSandbox mode enabled")
 
+    def _build_attachments_meta(self, *, mongo, file_refs: list[str]) -> list[dict[str, Any]]:
+        """构建附件元数据列表。"""
+        attachments_meta: list[dict[str, Any]] = []
+        for ref in file_refs:
+            mongo_id = str(ref)
+            filename = mongo_id
+            try:
+                detail = mongo.get_document_detail(doc_id=mongo_id)
+                if isinstance(detail, dict) and detail.get("filename"):
+                    filename = str(detail.get("filename"))
+            except Exception:
+                filename = mongo_id
+            attachments_meta.append({"mongo_id": mongo_id, "filename": filename})
+        return attachments_meta
+
+    def _build_system_prompt(
+        self,
+        *,
+        memory_text: str,
+        attachments_meta: list[dict[str, Any]],
+    ) -> str:
+        """构建系统提示词。"""
+        parts = [
+            sandbox_environment_prompt(),
+            reference_rules_prompt(),
+            file_write_rules_prompt(),
+            task_subagent_type_rules_prompt(),
+            research_task_rules_prompt(),
+        ]
+        extra_system_prompt = "\n\n".join(parts).strip()
+
+        if attachments_meta:
+            lines = [
+                "<selected_sources>",
+                "用户已附带来源如下（请把这些来源视为唯一上下文）：",
+            ]
+            for a in attachments_meta:
+                lines.append(f"- {a.get('filename') or a.get('mongo_id')} (id={a.get('mongo_id')})")
+            lines.extend(
+                [
+                    "使用规则：",
+                    "- 回答需要引用附件内容时，必须调用 rag_query 基于上述来源检索。",
+                    "- 不要调用 read_file 去读取工作区路径来替代附件内容。",
+                    "</selected_sources>",
+                ]
+            )
+            block = "\n".join(lines)
+            extra_system_prompt = (extra_system_prompt + "\n\n" + block).strip()
+        else:
+            if memory_text.strip():
+                extra_system_prompt = (
+                    (extra_system_prompt + "\n\n" + "<chat_memory>\n" + memory_text.strip() + "\n</chat_memory>")
+                    .strip()
+                )
+        return extra_system_prompt
+
+    def _build_tool_whitelist_prompt(self, tools: list[Any], rag_tool: Any) -> str:
+        """构建工具白名单提示词。"""
+        runtime_tool_names: set[str] = set()
+        for t in [*tools, rag_tool]:
+            name = getattr(t, "name", None)
+            if not name and callable(t):
+                name = getattr(t, "__name__", None)
+            if name:
+                runtime_tool_names.add(str(name))
+
+        runtime_tool_names.update(
+            {
+                "ls",
+                "read_file",
+                "write_file",
+                "write_to_file",
+                "edit_file",
+                "glob",
+                "grep",
+                "execute",
+                "task",
+                "write_todos",
+                "http_request",
+                "fetch_url",
+                "web_search",
+                "save_filesystem_write",
+                "rag_query",
+            }
+        )
+        return tool_whitelist_prompt(sorted(runtime_tool_names))
+
+    def _build_effective_user_text(self, *, text: str, rag_references: list[dict[str, Any]]) -> str:
+        """构建有效用户输入（包含强制 RAG 引用上下文）。"""
+        effective_user_text = text
+        if rag_references:
+            ctx_lines = [
+                "请只基于下面的附件检索片段完成总结，禁止引入其它记忆/常识内容，且必须用 [1][2] 标注引用：",
+            ]
+            for ref in rag_references[:8]:
+                src = ref.get("source") or "unknown"
+                snippet = ref.get("text") or ""
+                idx = ref.get("index")
+                ctx_lines.append(f"[{idx}] source={src}\n{snippet}")
+            effective_user_text = (str(text or "").strip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
+        return effective_user_text
+
+    async def _build_tools(self) -> list[Any]:
+        """构建工具列表（含可选 MCP 工具）。"""
+        tools: list[Any] = [http_request, fetch_url]
+        if settings.has_tavily:
+            tools.append(web_search)
+
+        try:
+            mcp_tools = await get_mcp_tool_service().get_tools()
+            if mcp_tools:
+                tools.extend(mcp_tools)
+                logger.info(
+                    "MCP tools loaded | tools_count=%s",
+                    len(mcp_tools),
+                )
+        except Exception as _mcp_exc:
+            logger.info(
+                "MCP tools load skipped | err=%s",
+                str(_mcp_exc),
+            )
+        return tools
+
+    async def _handle_stream_error(
+        self,
+        *,
+        exc: Exception,
+        thread_id: str,
+        assistant_accum: list[str],
+        stream_event_service: AgentStreamEventService,
+        stream_state: Any,
+        retry_count: int,
+        max_stream_retries: int,
+        rate_retry_count: int,
+        max_rate_retries: int,
+    ) -> tuple[bool, int, int, Any, str]:
+        """处理流式异常，返回是否继续、重试次数、stream_state 与错误信息。"""
+        if isinstance(exc, openai.APIError):
+            err_text = str(exc)
+            is_rate_limited = "rate increased too quickly" in err_text.lower()
+            if is_rate_limited and rate_retry_count < max_rate_retries and not assistant_accum:
+                rate_retry_count += 1
+                backoff_seconds = 0.5 * (2 ** (rate_retry_count - 1))
+                logger.warning(
+                    "rate limited, backing off | thread_id=%s | retry=%s | sleep=%.2fs",
+                    thread_id,
+                    rate_retry_count,
+                    backoff_seconds,
+                )
+                await asyncio.sleep(backoff_seconds)
+                return True, retry_count, rate_retry_count, stream_state, ""
+            err_msg = f"模型请求被限流：{type(exc).__name__}: {exc}"
+            logger.exception(err_msg)
+            return False, retry_count, rate_retry_count, stream_state, err_msg
+
+        if isinstance(exc, httpx.RemoteProtocolError):
+            if retry_count < max_stream_retries and not assistant_accum:
+                retry_count += 1
+                stream_state = stream_event_service.init_state()
+                logger.warning(
+                    "stream interrupted, retrying | thread_id=%s | retry=%s | err=%s",
+                    thread_id,
+                    retry_count,
+                    str(exc),
+                )
+                return True, retry_count, rate_retry_count, stream_state, ""
+            err_msg = f"模型流式连接被提前关闭：{type(exc).__name__}: {exc}"
+            logger.exception(err_msg)
+            return False, retry_count, rate_retry_count, stream_state, err_msg
+
+        err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
+        logger.exception(err_msg)
+        return False, retry_count, rate_retry_count, stream_state, err_msg
+
     async def stream_chat(
         self,
         *,
@@ -124,57 +298,15 @@ class ChatStreamService:
             memory_text = ""
 
         # 组装系统提示词：沙箱环境指南 + 引用规则 + 文件写入规则
-        extra_system_prompt = ""
-        attachments_meta: list[dict[str, Any]] = []
-
-        # 从 prompts 模块统一管理大段提示词，避免硬编码在业务逻辑里
-        parts = [
-            sandbox_environment_prompt(),
-            reference_rules_prompt(),
-            file_write_rules_prompt(),
-            task_subagent_type_rules_prompt(),
-            research_task_rules_prompt(),
-        ]
-        extra_system_prompt = "\n\n".join(parts).strip()
-
         # 处理附件元数据：将 MongoDB 文档 ID 转为文件名，并生成附件上下文提示词
+        attachments_meta: list[dict[str, Any]] = []
         if isinstance(file_refs, list):
-            for ref in file_refs:
-                mongo_id = str(ref)
-                filename = mongo_id
-                try:
-                    detail = mongo.get_document_detail(doc_id=mongo_id)
-                    if isinstance(detail, dict) and detail.get("filename"):
-                        filename = str(detail.get("filename"))
-                except Exception:
-                    filename = mongo_id
-                attachments_meta.append({"mongo_id": mongo_id, "filename": filename})
+            attachments_meta = self._build_attachments_meta(mongo=mongo, file_refs=file_refs)
 
-        # 如果有附件，在系统提示词中加入附件来源说明和使用规则
-        if attachments_meta:
-            lines = [
-                "<selected_sources>",
-                "用户已附带来源如下（请把这些来源视为唯一上下文）：",
-            ]
-            for a in attachments_meta:
-                lines.append(f"- {a.get('filename') or a.get('mongo_id')} (id={a.get('mongo_id')})")
-            lines.extend(
-                [
-                    "使用规则：",
-                    "- 回答需要引用附件内容时，必须调用 rag_query 基于上述来源检索。",
-                    "- 不要调用 read_file 去读取工作区路径来替代附件内容。",
-                    "</selected_sources>",
-                ]
-            )
-            block = "\n".join(lines)
-            extra_system_prompt = (extra_system_prompt + "\n\n" + block).strip()
-        else:
-            # 无附件时，如果有会话记忆，则加入记忆上下文
-            if memory_text.strip():
-                extra_system_prompt = (
-                    (extra_system_prompt + "\n\n" + "<chat_memory>\n" + memory_text.strip() + "\n</chat_memory>")
-                    .strip()
-                )
+        extra_system_prompt = self._build_system_prompt(
+            memory_text=memory_text,
+            attachments_meta=attachments_meta,
+        )
 
         # 保存用户消息到 MongoDB（包含附件元数据）
         chat_service = ChatService()
@@ -237,31 +369,7 @@ class ChatStreamService:
             logger.debug(f"模型初始化成功 | thread_id={thread_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}")
             
             # 初始化基础工具列表：HTTP 请求、网页抓取
-            tools = [http_request, fetch_url]
-            # 如果配置了 Tavily API，则加入网络搜索工具
-            if settings.has_tavily:
-                tools.append(web_search)
-
-            # MCP 工具接入（可选）：从 .deepagents/mcp.json 加载并合并到工具列表
-            # 说明：
-            # - deepagents 官方推荐通过 langchain-mcp-adapters 把 MCP tools 转为 LangChain tools
-            # - MCP tools 是异步工具，因此只能在 async 链路里 await 拉取
-            # - 如果未安装依赖/配置不存在/加载失败，这里会自动降级为不启用 MCP
-            try:
-                mcp_tools = await get_mcp_tool_service().get_tools()
-                if mcp_tools:
-                    tools.extend(mcp_tools)
-                    logger.info(
-                        "MCP tools loaded | thread_id=%s | tools_count=%s",
-                        thread_id,
-                        len(mcp_tools),
-                    )
-            except Exception as _mcp_exc:
-                logger.info(
-                    "MCP tools load skipped | thread_id=%s | err=%s",
-                    thread_id,
-                    str(_mcp_exc),
-                )
+            tools = await self._build_tools()
 
             # 创建 OpenSandbox 远程沙箱（如果配置可用）
             # 说明：沙箱用于执行代码、操作文件系统、运行技能等，提供安全的隔离环境
@@ -400,39 +508,7 @@ class ChatStreamService:
                 "tools": [*tools, rag_prep.rag_tool],
             }
 
-            # 关键逻辑：把运行时可用工具名显式注入 prompt，减少工具名拼写错误。
-            # 说明：
-            # - deepagents 内置 backend/skills 工具不一定能在这里直接拿到对象，因此用“显式兜底白名单”补齐。
-            # - 兜底名单来自运行时常见可用工具：ls/read_file/write_file/edit_file/glob/grep/execute/task/write_todos。
-            runtime_tool_names: set[str] = set()
-            for t in [*tools, rag_prep.rag_tool]:
-                name = getattr(t, "name", None)
-                if not name and callable(t):
-                    name = getattr(t, "__name__", None)
-                if name:
-                    runtime_tool_names.add(str(name))
-
-            runtime_tool_names.update(
-                {
-                    "ls",
-                    "read_file",
-                    "write_file",
-                    "write_to_file",
-                    "edit_file",
-                    "glob",
-                    "grep",
-                    "execute",
-                    "task",
-                    "write_todos",
-                    "http_request",
-                    "fetch_url",
-                    "web_search",
-                    "save_filesystem_write",
-                    "rag_query",
-                }
-            )
-
-            extra_system_prompt = (extra_system_prompt + "\n\n" + tool_whitelist_prompt(sorted(runtime_tool_names))).strip()
+            extra_system_prompt = (extra_system_prompt + "\n\n" + self._build_tool_whitelist_prompt(tools, rag_prep.rag_tool)).strip()
 
             agent = create_deep_agent(
                 model=model,
@@ -456,17 +532,7 @@ class ChatStreamService:
             )
 
             # 构建有效的用户文本（如果有强制 RAG 引用，则加入引用上下文）
-            effective_user_text = text
-            if rag_references:
-                ctx_lines = [
-                    "请只基于下面的附件检索片段完成总结，禁止引入其它记忆/常识内容，且必须用 [1][2] 标注引用：",
-                ]
-                for ref in rag_references[:8]:
-                    src = ref.get("source") or "unknown"
-                    snippet = ref.get("text") or ""
-                    idx = ref.get("index")
-                    ctx_lines.append(f"[{idx}] source={src}\n{snippet}")
-                effective_user_text = (str(text or "").strip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
+            effective_user_text = self._build_effective_user_text(text=str(text), rag_references=rag_references)
 
             # 准备流式输入和状态变量
             stream_input = {"messages": [HumanMessage(content=effective_user_text)]}
@@ -513,45 +579,22 @@ class ChatStreamService:
                             for delta in parsed.assistant_deltas:
                                 assistant_accum.append(str(delta))
                         break
-                    except openai.APIError as exc:
-                        # 说明：供应方限流导致请求被拒绝，做指数退避重试
-                        err_text = str(exc)
-                        is_rate_limited = "rate increased too quickly" in err_text.lower()
-                        if is_rate_limited and rate_retry_count < max_rate_retries and not assistant_accum:
-                            rate_retry_count += 1
-                            backoff_seconds = 0.5 * (2 ** (rate_retry_count - 1))
-                            logger.warning(
-                                "rate limited, backing off | thread_id=%s | retry=%s | sleep=%.2fs",
-                                thread_id,
-                                rate_retry_count,
-                                backoff_seconds,
-                            )
-                            await asyncio.sleep(backoff_seconds)
-                            continue
-                        err_msg = f"模型请求被限流：{type(exc).__name__}: {exc}"
-                        logger.exception(err_msg)
-                        yield {"type": "error", "message": err_msg}
-                        break
-                    except httpx.RemoteProtocolError as exc:
-                        # 只有在还没输出任何内容时才重试，避免前端拿到“半截回复”
-                        if retry_count < max_stream_retries and not assistant_accum:
-                            retry_count += 1
-                            stream_state = stream_event_service.init_state()
-                            logger.warning(
-                                "stream interrupted, retrying | thread_id=%s | retry=%s | err=%s",
-                                thread_id,
-                                retry_count,
-                                str(exc),
-                            )
-                            continue
-                        err_msg = f"模型流式连接被提前关闭：{type(exc).__name__}: {exc}"
-                        logger.exception(err_msg)
-                        yield {"type": "error", "message": err_msg}
-                        break
                     except Exception as exc:
-                        err_msg = f"模型调用失败：{type(exc).__name__}: {exc}"
-                        logger.exception(err_msg)
-                        yield {"type": "error", "message": err_msg}
+                        should_continue, retry_count, rate_retry_count, stream_state, err_msg = await self._handle_stream_error(
+                            exc=exc,
+                            thread_id=thread_id,
+                            assistant_accum=assistant_accum,
+                            stream_event_service=stream_event_service,
+                            stream_state=stream_state,
+                            retry_count=retry_count,
+                            max_stream_retries=max_stream_retries,
+                            rate_retry_count=rate_retry_count,
+                            max_rate_retries=max_rate_retries,
+                        )
+                        if should_continue:
+                            continue
+                        if err_msg:
+                            yield {"type": "error", "message": err_msg}
                         break
             finally:
                 logger.debug(
