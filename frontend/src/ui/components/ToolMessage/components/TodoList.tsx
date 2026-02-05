@@ -26,14 +26,12 @@ function StatusIcon({ status, index, isLast }: { status: TodoItem["status"]; ind
       
       <div className={cn(
         "relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-all mt-3.5",
-        status === "completed" && "bg-green-500 border-green-500 text-white",
-        status === "in_progress" && "border-blue-500 text-blue-500 bg-white",
+        status === "completed" && "bg-zinc-100 border-zinc-200 text-zinc-400",
+        status === "in_progress" && "border-zinc-900 text-zinc-900 bg-white",
         status === "pending" && "border-zinc-300 text-transparent bg-white"
       )}>
         {status === "completed" && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+          <div className="w-2.5 h-px bg-current" />
         )}
         {status === "in_progress" && (
            <div className="w-2.5 h-2.5 bg-current rounded-full animate-pulse" />
@@ -84,14 +82,14 @@ export function TodoList({
               <div className={cn(
                 "flex-1 px-4 py-3 rounded-2xl transition-all border",
                 item.status === "in_progress" 
-                  ? "bg-blue-50/50 border-blue-100/50 shadow-sm" 
+                  ? "bg-white border-zinc-200 shadow-sm ring-1 ring-black/5" 
                   : "bg-zinc-50/50 border-zinc-100 hover:bg-zinc-100 hover:border-zinc-200",
-                item.status === "completed" && "opacity-75"
+                item.status === "completed" && "bg-transparent border-transparent"
               )}>
                 <div className={cn(
                   "leading-relaxed",
-                  item.status === "completed" ? "text-muted-foreground" : "text-foreground",
-                  item.status === "in_progress" ? "font-medium text-blue-700" : ""
+                  item.status === "completed" ? "text-zinc-400 line-through" : "text-foreground",
+                  item.status === "in_progress" ? "font-semibold text-zinc-900" : ""
                 )}>
                   {item.content}
                 </div>

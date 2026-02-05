@@ -92,7 +92,7 @@ export function ToolMessage({
         className={cn(
           "inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all cursor-pointer select-none mb-2",
            status === "running" 
-             ? "bg-blue-50 border-blue-100 text-blue-700" 
+             ? "bg-zinc-50 border-zinc-200 text-zinc-800" 
              : "bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100",
            // 错误状态
            status === "error" && "bg-red-50 border-red-100 text-red-700"

@@ -4,6 +4,36 @@ import { ScrollArea } from "@/ui/components/ui/scroll-area";
 import { SearchResultList } from "../components/ResultList";
 import { tryParseSearchResults } from "../utils";
 
+import { cn } from "@/lib/utils";
+
+function renderDescription(text: string) {
+  if (!text) return null;
+  
+  // Split by newlines
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      {lines.map((line, i) => {
+        // Check for list items (1. xxx, -, *)
+        const isList = /^\d+\.|^[-*]/.test(line);
+        // Check for "key: value" pattern which acts as a header/meta
+        const isMeta = /^[^：:]+[：:]/.test(line) && line.length < 50;
+        
+        return (
+            <div key={i} className={cn(
+              "leading-relaxed text-zinc-600", 
+              isList && "pl-4 indent-[-0.5em]",
+              isMeta && "font-medium text-zinc-700 mt-1"
+            )}>
+               {line}
+            </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function extractText(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (value == null) return "";
@@ -83,14 +113,17 @@ export function TaskRenderer({ status, args, output }: ToolRendererProps) {
 
   return (
     <div className="w-full font-sans text-sm">
-      {(desc || subagent) && (
-        <div className="flex flex-wrap gap-2 mb-2 items-center">
-          {subagent && (
-            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border-zinc-200">
-              {subagent}
-            </Badge>
-          )}
-          {desc && <span className="text-zinc-600">{desc}</span>}
+      {subagent && (
+        <div className="mb-2">
+          <Badge variant="secondary" className="bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border-zinc-200">
+            {subagent}
+          </Badge>
+        </div>
+      )}
+      
+      {desc && (
+        <div className="mb-3 p-3 bg-zinc-50/80 rounded-xl border border-zinc-100">
+           {renderDescription(desc)}
         </div>
       )}
       
