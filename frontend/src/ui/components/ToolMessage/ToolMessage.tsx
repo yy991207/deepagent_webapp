@@ -1,15 +1,8 @@
-import { useState, useMemo, useEffect } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { Card, CardContent } from "@/ui/components/ui/card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/ui/components/ui/collapsible";
+import { useMemo, useEffect } from "react";
+import { Card } from "@/ui/components/ui/card";
 import { cn } from "@/lib/utils";
 import { getToolConfig } from "./registry";
 import { registerAllRenderers } from "./renderers";
-import { DefaultRenderer } from "./renderers/DefaultRenderer";
 import { Icons } from "./Icons";
 import type { ToolMessageProps, ToolStatus } from "./types";
 
@@ -40,13 +33,10 @@ function StatusIndicator({ status }: { status: ToolStatus }) {
 // 主组件
 export function ToolMessage({
   toolName,
-  toolCallId,
   status = "done",
   args,
-  output,
   startTime,
   endTime,
-  metadata,
 }: ToolMessageProps) {
   // 确保渲染器已注册
   useEffect(() => {
@@ -68,20 +58,13 @@ export function ToolMessage({
     return config.defaultExpanded ?? false;
   };
 
-  const [isOpen, setIsOpen] = useState(getDefaultExpanded);
+  // 兼容旧逻辑：保留默认展开策略的计算，但不再渲染内容区
+  void getDefaultExpanded;
 
-  // 使用配置中的渲染器或默认渲染器
-  const Renderer = config?.Renderer || DefaultRenderer;
   const Icon = config?.icon || Icons.Tool;
 
   // 生成显示名称
   const displayName = config?.getDisplayName?.(args) || toolName;
-
-  // 执行中提示
-  const runningHint =
-    status === "running" && config?.getRunningHint
-      ? config.getRunningHint(args)
-      : null;
 
   // 计算执行时间
   const duration =
@@ -91,69 +74,41 @@ export function ToolMessage({
 
   // 状态对应的边框样式
   const statusBorderStyles = {
-    running: "border-blue-400 shadow-sm shadow-blue-100",
-    done: "border-border",
-    error: "border-red-400",
+    running: "ring-1 ring-blue-200/70",
+    done: "ring-1 ring-black/5",
+    error: "ring-1 ring-red-200/70",
   };
 
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-all py-0 gap-0",
+        "overflow-hidden transition-all py-0 gap-0 rounded-xl",
+        "bg-background/95",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+        "hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]",
+        "hover:ring-1 hover:ring-black/10",
         statusBorderStyles[status]
       )}
     >
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger className="w-full">
-          <div
-            className={cn(
-              "flex items-center justify-between px-4 py-3 cursor-pointer",
-              "hover:bg-muted/50 transition-colors"
-            )}
-          >
-            <div className="flex items-center gap-2.5">
-              <StatusIndicator status={status} />
-              <span className="text-muted-foreground">
-                <Icon />
-              </span>
-              <span className="font-medium text-sm">{displayName}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {duration && (
-                <span className="text-xs text-muted-foreground font-mono">
-                  {duration}s
-                </span>
-              )}
-              {isOpen ? (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              )}
-            </div>
-          </div>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <CardContent className="pt-0 pb-4 border-t">
-            {runningHint ? (
-              <div className="py-3 text-sm text-muted-foreground italic">
-                {runningHint}
-              </div>
-            ) : (
-              <div className="pt-3">
-                <Renderer
-                  status={status}
-                  args={args}
-                  output={output}
-                  startTime={startTime}
-                  endTime={endTime}
-                  metadata={metadata}
-                />
-              </div>
-            )}
-          </CardContent>
-        </CollapsibleContent>
-      </Collapsible>
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 py-3",
+          "hover:bg-muted/50 transition-colors"
+        )}
+      >
+        <div className="flex items-center gap-2.5">
+          <StatusIndicator status={status} />
+          <span className="text-muted-foreground">
+            <Icon />
+          </span>
+          <span className="font-medium text-sm">{displayName}</span>
+        </div>
+        {duration && (
+          <span className="text-xs text-muted-foreground font-mono">
+            {duration}s
+          </span>
+        )}
+      </div>
     </Card>
   );
 }
