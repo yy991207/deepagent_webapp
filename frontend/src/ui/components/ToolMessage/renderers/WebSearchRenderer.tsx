@@ -1,5 +1,6 @@
 import type { ToolRendererProps } from "../types";
 import { SearchResultList } from "../components/ResultList";
+import { ScrollArea } from "@/ui/components/ui/scroll-area";
 
 export function WebSearchRenderer({ status, args, output }: ToolRendererProps) {
   const query = (args as any)?.query || (args as any)?.q || "";
@@ -58,9 +59,11 @@ export function WebSearchRenderer({ status, args, output }: ToolRendererProps) {
       {results.length > 0 ? (
         <SearchResultList results={results} />
       ) : (
-        <div className="tool-text">
-          {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
-        </div>
+        <ScrollArea className="tool-scroll">
+          <div className="tool-plain">
+            {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+          </div>
+        </ScrollArea>
       )}
     </div>
   );

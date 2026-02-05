@@ -205,6 +205,7 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .tool-code {
@@ -219,6 +220,7 @@
   color: var(--tool-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .tool-list {
@@ -256,6 +258,23 @@
   color: var(--tool-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tool-scroll {
+  max-height: 260px;
+  width: 100%;
+}
+
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-section__title {
+  font-size: 12px;
+  color: var(--tool-text-muted);
 }
 
 /* 代码块组件 */
@@ -656,6 +675,7 @@
   color: #1a73e8;
   margin-bottom: 4px;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .tool-search__result-title:hover {
@@ -666,12 +686,14 @@
   font-size: 12px;
   color: var(--tool-status-done);
   margin-bottom: 6px;
+  word-break: break-all;
 }
 
 .tool-search__result-snippet {
   font-size: 13px;
   color: var(--tool-text-secondary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* RAG 查询渲染器 */
@@ -1072,11 +1094,19 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-.tool-task__meta {
-  font-size: 12px;
-  color: var(--tool-text-muted);
+.tool-task__meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-task__badge {
+  background: #f3f4f6;
+  color: #111827;
+  border-color: #e5e7eb;
 }
 
 .tool-task__result {
@@ -1091,6 +1121,7 @@
   color: var(--tool-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .tool-task__hint {
@@ -1144,6 +1175,7 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* 响应式调整 */

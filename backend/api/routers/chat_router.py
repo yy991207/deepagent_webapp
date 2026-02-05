@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -19,6 +20,7 @@ from backend.services.session_cancel_service import get_session_cancel_service
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # 项目根目录：deepagents-webapp/
@@ -288,6 +290,7 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
                 event["session_id"] = session_id
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
+            logger.exception("chat_stream_sse failed | session_id=%s", session_id)
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc), 'session_id': session_id})}\n\n"
 
     return StreamingResponse(

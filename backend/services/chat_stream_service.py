@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import inspect
 import logging
 import time
 from pathlib import Path
@@ -219,11 +220,15 @@ class ChatStreamService:
 
             # 说明：这里只做重复名别名，不处理其它拼写错误
             def _alias(*args: Any, _tool: Any = t, **kwargs: Any) -> Any:
+                if not args and not kwargs:
+                    return {"error": f"{base_name} 缺少必要参数"}
                 return _tool(*args, **kwargs)
 
             try:
                 _alias.__name__ = alias_name
                 _alias.__doc__ = getattr(t, "__doc__", None)
+                _alias.__annotations__ = getattr(t, "__annotations__", {}).copy()
+                _alias.__signature__ = inspect.signature(t)
             except Exception:
                 pass
             aliases.append(_alias)

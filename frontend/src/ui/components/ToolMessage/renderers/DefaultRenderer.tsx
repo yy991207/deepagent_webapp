@@ -1,4 +1,5 @@
 import type { ToolRendererProps } from "../types";
+import { ScrollArea } from "@/ui/components/ui/scroll-area";
 
 // JSON 格式化辅助函数
 function formatJson(data: unknown): string {
@@ -48,7 +49,9 @@ export function DefaultRenderer({ status, args, output }: ToolRendererProps) {
             ))}
           </ul>
         ) : (
-          <pre className="tool-code">{formatJson(data)}</pre>
+          <ScrollArea className="tool-scroll">
+            <pre className="tool-code">{formatJson(data)}</pre>
+          </ScrollArea>
         )}
       </div>
     );
