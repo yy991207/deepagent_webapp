@@ -526,6 +526,7 @@ function App() {
   const pendingWritesForNextRef = useRef<FilesystemWrite[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSessionIdRef = useRef<string>("");
+  const isAutoScrollEnabledRef = useRef(true);
 
   const [sessionId, setSessionId] = useState<string>(() => {
     const sid = getOrCreateSessionId();
@@ -617,7 +618,19 @@ function App() {
       if (!statusData.active) return;
 
       // 保留用户消息，清除 assistant/tool 消息（将由事件流重放重建）
-      setMessages((prev) => prev.filter((m) => m.role === "user"));
+      setMessages((prev) => {
+        // 找到最后一条用户消息的索引
+        let lastUserIndex = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === "user") {
+            lastUserIndex = i;
+            break;
+          }
+        }
+        // 保留最后一条用户消息及其之前的所有消息
+        // 清除最后一条用户消息之后的所有 assistant/tool 消息（它们属于未完成的流，将由 resume 重建）
+        return lastUserIndex >= 0 ? prev.slice(0, lastUserIndex + 1) : [];
+      });
       resetStreamState();
       setStatus("思考中...");
 
@@ -1334,8 +1347,20 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (force = false) => {
+    if (force || isAutoScrollEnabledRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      if (force) {
+        isAutoScrollEnabledRef.current = true;
+      }
+    }
+  };
+
+  const handleChatScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    const { scrollTop, scrollHeight, clientHeight } = target;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+    isAutoScrollEnabledRef.current = isNearBottom;
   };
 
   const addLog = (message: string, type: "info" | "error" | "tool" = "info") => {
@@ -1844,6 +1869,8 @@ function App() {
       ...prev,
       { id: createId(), role: "user", content: trimmed, attachments, timestamp: userTimestamp },
     ]);
+    // 用户发送消息时强制滚动到底部
+    setTimeout(() => scrollToBottom(true), 0);
     setStatus("思考中...");
     setInput("");
     setSelectedFiles(new Set());
@@ -2206,7 +2233,7 @@ function App() {
             <div className="chat-title">对话</div>
           </header>
 
-          <div className="chat-messages">
+          <div className="chat-messages" onScroll={handleChatScroll}>
             {messages.length === 0 && (
                <div className="empty-state">
                   <div className="empty-icon"><Icons.Sparkles /></div>
@@ -3369,6 +3396,42 @@ function App() {
                             }}
                             sandbox="allow-same-origin"
                           />
+                        );
+                      }
+                      
+                      // Office 文档：提示下载
+                      if (["ppt", "pptx", "doc", "docx", "xls", "xlsx"].includes(fileType)) {
+                        return (
+                          <div style={{ 
+                            display: "flex", 
+                            flexDirection: "column", 
+                            alignItems: "center", 
+                            justifyContent: "center", 
+                            height: "calc(100vh - 200px)",
+                            minHeight: "400px",
+                            gap: "24px",
+                            color: "#666",
+                            background: "#f8f9fa",
+                            borderRadius: "8px",
+                            border: "1px solid #e0e0e0"
+                          }}>
+                            <div style={{ fontSize: "64px", opacity: 0.5 }}><Icons.Drive /></div>
+                            <div style={{ fontSize: "16px" }}>此文件 ({fileType}) 暂不支持在线预览</div>
+                            <button 
+                              className="add-source-action primary"
+                              onClick={() => {
+                                const downloadUrl = `/api/filesystem/write/${encodeURIComponent(writeDetail.write_id)}/download?session_id=${encodeURIComponent(sessionId)}`;
+                                const link = document.createElement("a");
+                                link.href = downloadUrl;
+                                link.download = writeDetail.title.endsWith(`.${fileType}`) ? writeDetail.title : `${writeDetail.title}.${fileType}`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                            >
+                              下载查看
+                            </button>
+                          </div>
                         );
                       }
                       // 其他文件：使用 AssistantContent 渲染（文本/Markdown）
