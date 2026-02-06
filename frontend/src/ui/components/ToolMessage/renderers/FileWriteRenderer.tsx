@@ -6,6 +6,10 @@ export function FileWriteRenderer({ status, args, output }: ToolRendererProps) {
   const path = (args as any)?.TargetFile || (args as any)?.file_path || (args as any)?.path || "";
   const content = (args as any)?.CodeContent || (args as any)?.content || "";
   
+  // 预先声明 success 变量
+  let success = true;
+  let message = "";
+
   if (status === "running") {
     return (
       <div className="tool-file-write">
@@ -20,10 +24,54 @@ export function FileWriteRenderer({ status, args, output }: ToolRendererProps) {
     );
   }
 
-  // 检查是否成功
-  let success = true;
-  let message = "";
+  // 检查是否为结构化文档生成结果 (如 PDF 报告)
+  // 格式: {"status": "success", "title": "...", "type": "pdf", ...}
+  let artifactTitle = "";
+  let artifactType = "";
   
+  if (output && typeof output === "string" && output.trim().startsWith("{")) {
+    try {
+      const json = JSON.parse(output);
+      if (json.title && json.type) {
+        artifactTitle = json.title;
+        artifactType = json.type;
+        success = json.status === "success";
+      }
+    } catch {}
+  } else if (output && typeof output === "object") {
+     const out = output as any;
+     if (out.title && out.type) {
+        artifactTitle = out.title;
+        artifactType = out.type;
+        success = out.status === "success";
+     }
+  }
+
+  // 如果是文档生成结果，渲染专门的卡片
+  if (artifactTitle) {
+    return (
+      <div className="tool-file-write">
+         <div className="tool-artifact-card">
+            <div className="tool-artifact-icon">
+               {artifactType.toLowerCase() === 'pdf' ? <Icons.Pdf /> : <Icons.File />}
+            </div>
+            <div className="tool-artifact-info">
+               <div className="tool-artifact-title">{artifactTitle}</div>
+               <div className="tool-artifact-meta">
+                  {artifactType.toUpperCase()} 文档 · {success ? "已生成" : "生成失败"}
+               </div>
+            </div>
+            {success && (
+               <div className="tool-artifact-action">
+                  <Icons.Check />
+               </div>
+            )}
+         </div>
+      </div>
+    );
+  }
+
+  // 普通文件写入检查
   if (typeof output === "string") {
     success = !output.toLowerCase().includes("error") && !output.toLowerCase().includes("failed");
     message = output;
