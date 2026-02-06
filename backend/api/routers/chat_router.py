@@ -17,6 +17,7 @@ from backend.services.memory_summary_service import MemorySummaryService
 from backend.utils.snowflake import generate_snowflake_id
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.session_cancel_service import get_session_cancel_service
+from backend.services.stream_session_manager import get_stream_session_manager
 
 
 router = APIRouter()
@@ -277,8 +278,12 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="text is required")
 
     service = ChatStreamService(base_dir=BASE_DIR)
+    manager = get_stream_session_manager()
 
-    async def event_generator():
+    # 在后台任务中运行 stream_chat()，事件写入内存 buffer
+    # 这样客户端断连（刷新页面）不会中断 agent 执行
+    async def _tagged_gen():
+        """包装 stream_chat()，为每条事件注入 session_id。"""
         try:
             async for event in service.stream_chat(
                 text=text,
@@ -286,12 +291,58 @@ async def chat_stream_sse(payload: dict[str, Any]) -> StreamingResponse:
                 assistant_id=assistant_id,
                 file_refs=file_refs,
             ):
-                # 每条 SSE 事件都带上 session_id，便于前端过滤旧会话事件
                 event["session_id"] = session_id
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield event
         except Exception as exc:
             logger.exception("chat_stream_sse failed | session_id=%s", session_id)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc), 'session_id': session_id})}\n\n"
+            yield {"type": "error", "message": str(exc), "session_id": session_id}
+
+    manager.start(session_id, _tagged_gen())
+
+    # SSE 响应从 buffer 消费，客户端断连只影响这个 generator
+    async def event_generator():
+        async for event in manager.subscribe(session_id, from_index=0):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/api/chat/stream/status")
+def chat_stream_status(session_id: str) -> dict[str, Any]:
+    """查询指定会话是否有正在进行的流式任务。
+
+    前端页面加载时调用，判断是否需要 resume。
+    """
+    manager = get_stream_session_manager()
+    session = manager.get(session_id)
+    if session is None:
+        return {"active": False, "event_count": 0, "status": "none"}
+    return {
+        "active": session.is_active,
+        "event_count": session.event_count,
+        "status": session.status,
+    }
+
+
+@router.get("/api/chat/stream/resume")
+async def chat_stream_resume(session_id: str, from_index: int = 0) -> StreamingResponse:
+    """断线重连：从 event_buffer[from_index:] 开始，继续实时推送事件。
+
+    如果 session 不存在，返回空 SSE 流。
+    """
+    manager = get_stream_session_manager()
+
+    async def event_generator():
+        async for event in manager.subscribe(session_id, from_index=from_index):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),

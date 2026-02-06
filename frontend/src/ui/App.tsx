@@ -558,18 +558,87 @@ function App() {
   };
 
   const cancelActiveStream = async (sid: string) => {
-    // 没有正在进行的流式请求就不触发取消，避免误伤
-    if (!abortControllerRef.current) return;
-    // 先终止前端 SSE 请求，再通知后端中断对应会话的流式生成
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    // 终止前端 SSE 读取（如果有）
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     resetStreamState();
+    // 通知后端取消后台任务（即使前端没有活跃连接，后台任务可能仍在运行）
     const session = String(sid || "").trim();
     if (!session) return;
     try {
       await fetch(`/api/chat/session/${encodeURIComponent(session)}/cancel`, { method: "POST" });
     } catch {
       // ignore
+    }
+  };
+
+  /** 从 SSE Response 读取事件并分发到 handleSocketPayload */
+  const readSSEStream = async (response: Response) => {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const payload = JSON.parse(line.slice(6)) as SocketPayload;
+            handleSocketPayload(payload);
+          } catch (e) {
+            console.error("Failed to parse SSE event:", e);
+          }
+        }
+      }
+    }
+  };
+
+  /** 页面刷新后检测并恢复正在进行的后台流 */
+  const resumeActiveStream = async (sid: string) => {
+    const session = String(sid || "").trim();
+    if (!session) return;
+    try {
+      const statusResp = await fetch(
+        `/api/chat/stream/status?session_id=${encodeURIComponent(session)}`,
+      );
+      if (!statusResp.ok) return;
+      const statusData = (await statusResp.json()) as {
+        active: boolean;
+        event_count: number;
+        status: string;
+      };
+      // 后台任务已结束，无需恢复
+      if (!statusData.active) return;
+
+      // 保留用户消息，清除 assistant/tool 消息（将由事件流重放重建）
+      setMessages((prev) => prev.filter((m) => m.role === "user"));
+      resetStreamState();
+      setStatus("思考中...");
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      const response = await fetch(
+        `/api/chat/stream/resume?session_id=${encodeURIComponent(session)}&from_index=0`,
+        { signal: abortController.signal },
+      );
+      if (!response.ok) {
+        abortControllerRef.current = null;
+        return;
+      }
+      await readSSEStream(response);
+    } catch (error: any) {
+      if (error.name !== "AbortError") {
+        console.error("Resume stream failed:", error);
+      }
+    } finally {
+      abortControllerRef.current = null;
     }
   };
 
@@ -638,13 +707,18 @@ function App() {
   useEffect(() => {
     fetchTree();
     void fetchSources();
-    void fetchChatHistory(sessionId);
+    // 加载历史后检测是否有正在进行的后台流，有则自动恢复
+    void (async () => {
+      await fetchChatHistory(sessionId);
+      await resumeActiveStream(sessionId);
+    })();
     void fetchChatSessions();
     void refreshMemoryStats(sessionId);
     void fetchPodcastSpeakerProfiles();
     void fetchPodcastEpisodeProfiles();
     void fetchPodcastRuns();
     return () => {
+      // 页面卸载只断开 SSE 连接，不取消后台任务（刷新后可恢复）
       abortControllerRef.current?.abort();
     };
   }, []);
@@ -1794,34 +1868,7 @@ function App() {
         throw new Error(`HTTP ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("No response body");
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const json = line.slice(6);
-            try {
-              const payload = JSON.parse(json) as SocketPayload;
-              handleSocketPayload(payload);
-            } catch (e) {
-              console.error("Failed to parse SSE event:", e);
-            }
-          }
-        }
-      }
+      await readSSEStream(response);
     } catch (error: any) {
       if (error.name !== "AbortError") {
         setStatus("连接失败");
@@ -2174,18 +2221,17 @@ function App() {
                 return -1;
               })();
 
-              // 判断是否是连续工具调用中的第一个（前一个消息不是 tool）
+              // 判断是否应该显示头像：整个 assistant 回合只在最开始显示一次
               const prevMessage = index > 0 ? messages[index - 1] : null;
-              const isFirstToolInSequence = message.role === "tool" && (!prevMessage || prevMessage.role !== "tool");
-              // 判断 assistant 消息是否紧跟在 tool 消息后面（此时不显示头像，因为 tool 已显示）
-              const isAssistantAfterTool = message.role === "assistant" && prevMessage && prevMessage.role === "tool";
+              // 工具/助手消息：只有前一条是 user 消息，或者是第一条消息时才显示头像
+              const shouldShowAvatar = !prevMessage || prevMessage.role === "user";
               
               return (
               <div key={message.id} className={`message-row ${message.role}`}>
                 {message.role === "tool" ? (
                   <div className="assistant-row">
-                    <div className={`assistant-avatar-col ${!isFirstToolInSequence ? 'avatar-hidden' : ''}`}>
-                      {isFirstToolInSequence && (
+                    <div className={`assistant-avatar-col ${!shouldShowAvatar ? 'avatar-hidden' : ''}`}>
+                      {shouldShowAvatar && (
                         <div className="assistant-avatar">
                           <Icons.NotebookLogo />
                         </div>
@@ -2202,8 +2248,8 @@ function App() {
                   </div>
                 ) : message.role === "assistant" ? (
                   <div className="assistant-row">
-                    <div className={`assistant-avatar-col ${isAssistantAfterTool ? 'avatar-hidden' : ''}`}>
-                      {!isAssistantAfterTool && (
+                    <div className={`assistant-avatar-col ${!shouldShowAvatar ? 'avatar-hidden' : ''}`}>
+                      {shouldShowAvatar && (
                         <div className="assistant-avatar">
                           <Icons.NotebookLogo />
                         </div>
