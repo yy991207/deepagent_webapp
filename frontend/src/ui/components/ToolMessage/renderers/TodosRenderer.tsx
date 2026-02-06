@@ -209,16 +209,24 @@ export function TodosRenderer({ status, args, output, startTime, endTime }: Tool
                     <span
                       className={cn(
                         "tool-subtask__check",
-                        item.status === "completed" ? "tool-subtask__check--done" : ""
+                        item.status === "completed" && "bg-zinc-100 text-zinc-400 rounded-full",
+                        item.status === "in_progress" && "bg-black text-white rounded-full"
                       )}
                     >
-                      {item.status === "completed" ? <Icons.Check /> : <span className="tool-subtask__dot" />}
+                      {item.status === "completed" ? (
+                        <div className="w-2.5 h-px bg-current" />
+                      ) : item.status === "in_progress" ? (
+                        <div className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
+                      ) : (
+                        <span className="tool-subtask__dot" />
+                      )}
                     </span>
                     <div className="tool-subtask__content">
                       <div
                         className={cn(
                           "tool-subtask__title",
-                          item.status === "completed" ? "tool-subtask__title--done" : ""
+                          item.status === "completed" ? "tool-subtask__title--done" : "",
+                          item.status === "in_progress" ? "font-bold text-black" : ""
                         )}
                       >
                         {item.title}

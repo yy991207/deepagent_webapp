@@ -27,7 +27,7 @@ function StatusIcon({ status, index, isLast }: { status: TodoItem["status"]; ind
       <div className={cn(
         "relative z-10 w-5 h-5 rounded-full flex items-center justify-center border transition-all mt-3.5",
         status === "completed" && "bg-zinc-100 border-zinc-200 text-zinc-400",
-        status === "in_progress" && "border-zinc-900 text-zinc-900 bg-white",
+        status === "in_progress" && "bg-black border-black text-white",
         status === "pending" && "border-zinc-300 text-transparent bg-white"
       )}>
         {status === "completed" && (
@@ -89,7 +89,7 @@ export function TodoList({
                 <div className={cn(
                   "leading-relaxed",
                   item.status === "completed" ? "text-zinc-400 line-through" : "text-foreground",
-                  item.status === "in_progress" ? "font-semibold text-zinc-900" : ""
+                  item.status === "in_progress" ? "font-bold text-black" : ""
                 )}>
                   {item.content}
                 </div>

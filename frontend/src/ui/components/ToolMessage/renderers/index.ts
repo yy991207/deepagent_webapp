@@ -72,13 +72,78 @@ export function registerAllRenderers(): void {
 
   // Shell / Bash 执行
   registerTool({
-    names: ["shell", "bash", "execute_command", "run_command"],
+    names: ["shell", "bash", "execute", "execute_command", "run_command", "run_shell_command"],
     Renderer: ShellRenderer,
     icon: Icons.Terminal,
     getDisplayName: (args) => {
       const cmd = (args as any)?.command || (args as any)?.cmd || "";
-      const shortCmd = cmd.length > 30 ? cmd.slice(0, 30) + "..." : cmd;
-      return shortCmd ? `执行: ${shortCmd}` : "命令执行";
+      
+      // 智能语义化标题生成
+      if (!cmd) return "命令执行";
+
+      const lowerCmd = cmd.toLowerCase().trim();
+
+      // 1. 包管理
+      if (lowerCmd.includes("pip install") || lowerCmd.includes("npm install") || lowerCmd.includes("yarn add")) {
+        // 尝试提取包名
+        const pkgMatch = cmd.match(/(?:install|add)\s+([a-zA-Z0-9_\-\s\.]+)/i);
+        const pkg = pkgMatch ? pkgMatch[1].trim().split(/\s+/)[0] : "";
+        return pkg ? `安装依赖: ${pkg}...` : "安装依赖";
+      }
+      
+      // 2. Python 执行
+      if (lowerCmd.startsWith("python") || lowerCmd.includes(" python ")) {
+        const pyMatch = cmd.match(/python\s+(?:-m\s+)?([^\s;]+)/);
+        const script = pyMatch ? pyMatch[1].split('/').pop() : "";
+        return script ? `运行脚本: ${script}` : "运行 Python";
+      }
+
+      // 3. 环境配置
+      if (lowerCmd.includes("source ") || lowerCmd.includes("/activate") || lowerCmd.includes("conda activate")) {
+        return "激活虚拟环境";
+      }
+      
+      // 4. 文件操作
+      if (lowerCmd.startsWith("cd ")) {
+        const target = cmd.split(/\s+/)[1] || "";
+        return `切换目录${target ? `: ${target}` : ""}`;
+      }
+      if (lowerCmd.startsWith("ls") || lowerCmd.startsWith("dir")) {
+        return "查看目录内容";
+      }
+      if (lowerCmd.startsWith("cat ") || lowerCmd.startsWith("head ") || lowerCmd.startsWith("tail ")) {
+        const file = cmd.split(/\s+/)[1] || "";
+        return `查看文件: ${file.split('/').pop()}`;
+      }
+      if (lowerCmd.startsWith("mkdir ")) {
+        return "创建目录";
+      }
+      if (lowerCmd.startsWith("rm ")) {
+        return "删除文件";
+      }
+      if (lowerCmd.startsWith("cp ") || lowerCmd.startsWith("mv ")) {
+        return "移动/复制文件";
+      }
+
+      // 5. Git 操作
+      if (lowerCmd.startsWith("git ")) {
+        if (lowerCmd.includes("clone")) return "克隆代码库";
+        if (lowerCmd.includes("commit")) return "提交代码";
+        if (lowerCmd.includes("push")) return "推送代码";
+        if (lowerCmd.includes("pull")) return "拉取代码";
+        if (lowerCmd.includes("status")) return "查看 Git 状态";
+        if (lowerCmd.includes("diff")) return "查看 Git 差异";
+        return "Git 操作";
+      }
+
+      // 6. 其它常见工具
+      if (lowerCmd.startsWith("grep ")) return "搜索文本";
+      if (lowerCmd.startsWith("curl ") || lowerCmd.startsWith("wget ")) return "下载/请求";
+      if (lowerCmd.startsWith("ping ")) return "网络测试";
+
+      // 兜底：如果命令不太长，显示命令前部；否则显示通用标题
+      if (cmd.length < 20) return `执行: ${cmd}`;
+      return `执行命令 (${cmd.slice(0, 15)}...)`;
     },
     defaultExpanded: (status) => status === "running",
   });
@@ -98,10 +163,14 @@ export function registerAllRenderers(): void {
 
   // 文件写入
   registerTool({
-    names: ["write_file", "write_to_file", "create_file"],
+    names: ["write_file", "write_to_file", "create_file", "save_filesystem_write"],
     Renderer: FileWriteRenderer,
     icon: Icons.File,
     getDisplayName: (args) => {
+      // 检查是否是 artifact 生成
+      const title = (args as any)?.title;
+      if (title) return `生成文档: ${title}`;
+
       const path = (args as any)?.TargetFile || (args as any)?.file_path || (args as any)?.path || "";
       const filename = path.split("/").pop() || "文件";
       return `写入: ${filename}`;

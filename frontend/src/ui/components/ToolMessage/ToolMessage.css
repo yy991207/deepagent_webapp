@@ -493,10 +493,37 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  background: #1a1a1a;
+  padding: 8px 12px;
+  background: #2b2b2b;
   border-radius: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  margin-top: 8px;
+}
+
+.tool-shell__command-wrapper {
+  margin-bottom: 12px;
+}
+
+.tool-shell__details {
+  font-size: 12px;
+  color: var(--tool-text-secondary);
+}
+
+.tool-shell__summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tool-text-muted);
+  transition: color 0.2s;
+}
+
+.tool-shell__summary:hover {
+  color: var(--tool-text-primary);
+}
+
+.tool-shell__summary::marker {
+  color: var(--tool-text-muted);
 }
 
 .tool-shell__prompt {
@@ -513,18 +540,56 @@
   word-break: break-all;
 }
 
-.tool-shell__output {
-  padding: 12px;
-  background: var(--tool-code-bg);
-  border: 1px solid var(--tool-code-border);
+.tool-shell__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tool-shell__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tool-text-muted);
+  letter-spacing: 0.5px;
+}
+
+.tool-shell__label--error {
+  color: var(--tool-status-error);
+}
+
+.tool-shell__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
   border-radius: 6px;
-  font-family: monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 300px;
-  overflow-y: auto;
+}
+
+.tool-shell__status--success {
+  background: #e6f4ea;
+  color: #137333;
+}
+
+.tool-shell__status--success svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-shell__status--error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+.tool-status-icon-x {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
 }
 
 /* 文件读取渲染器 */
@@ -621,7 +686,73 @@
   height: 14px;
 }
 
-/* 搜索渲染器 */
+.tool-file-write__error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #fce8e6;
+  border-radius: 6px;
+  color: #c5221f;
+  font-size: 12px;
+}
+
+/* Artifact Card */
+.tool-artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--tool-card-border);
+  border-radius: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.tool-artifact-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.tool-artifact-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fce8e6; /* PDF Red-ish bg */
+  border-radius: 8px;
+  color: #c5221f;
+}
+
+.tool-artifact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-artifact-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tool-text-primary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-artifact-meta {
+  font-size: 12px;
+  color: var(--tool-text-secondary);
+}
+
+.tool-artifact-action {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tool-status-done);
+  background: #e6f4ea;
+  border-radius: 50%;
+}
 .tool-search {
   padding: 12px 16px;
 }

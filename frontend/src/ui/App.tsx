@@ -109,25 +109,7 @@ const upsertToolMessage = (
     return prev.map((m, i) => (i === existingIndex ? merged : m));
   }
   
-  // 新的 tool 消息应该插入到最后一个 assistant 消息之前
-  // 这样可以保持 tool 调用在 assistant 回复之前的正确顺序
-  // 从后往前找，找到最后一个 assistant 消息的位置
-  let insertIndex = prev.length;
-  for (let i = prev.length - 1; i >= 0; i--) {
-    if (prev[i].role === "assistant") {
-      insertIndex = i;
-      break;
-    }
-    // 如果遇到 user 消息，说明还没有 assistant 回复，直接添加到末尾
-    if (prev[i].role === "user") {
-      break;
-    }
-  }
-  
-  // 插入到指定位置
-  const result = [...prev];
-  result.splice(insertIndex, 0, merged);
-  return result;
+  return [...prev, merged];
 };
 
 // --- Icons ---
@@ -538,6 +520,10 @@ function App() {
   const pendingRefsRef = useRef<any[] | null>(null);
   const currentMessageIdRef = useRef<string | null>(null);
   const pendingWritesRef = useRef<Map<string, FilesystemWrite[]>>(new Map());
+  // 新增：专门用于存储“下一个即将到来的 assistant 消息”应该绑定的文档
+  // 当工具执行完毕但对应的 assistant 文本消息还没开始时，由于此时没有 messageId，
+  // 只能暂存到这里，等待下一个 chat.delta 触发的新消息认领
+  const pendingWritesForNextRef = useRef<FilesystemWrite[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSessionIdRef = useRef<string>("");
 
@@ -568,6 +554,7 @@ function App() {
     assistantBufferRef.current = { id: "", text: "" };
     pendingAssistantIdRef.current = null;
     pendingRefsRef.current = null;
+    pendingWritesForNextRef.current = [];
   };
 
   const cancelActiveStream = async (sid: string) => {
@@ -1571,8 +1558,17 @@ function App() {
           }
           console.log("创建新 assistant 消息:", id);
           
-          // 检查是否有待绑定的文档
-          const pendingWrites = pendingWritesRef.current.get(id);
+          // 检查是否有待绑定的文档（通过 ID 匹配）
+          const pendingWrites = pendingWritesRef.current.get(id) || [];
+          
+          // 检查是否有待绑定的“下一个”文档（无 ID 匹配，FIFO 认领）
+          const nextWrites = pendingWritesForNextRef.current;
+          if (nextWrites.length > 0) {
+            console.log(`新消息 ${id} 认领了 ${nextWrites.length} 个待绑定文档`);
+            pendingWrites.push(...nextWrites);
+            pendingWritesForNextRef.current = [];
+          }
+
           if (pendingWrites && pendingWrites.length > 0) {
             console.log(`发现待绑定文档 ${pendingWrites.length} 个，立即绑定到消息 ${id}`);
             pendingWritesRef.current.delete(id);
@@ -1600,6 +1596,12 @@ function App() {
     }
     if (payload.type === "tool.start") {
       addLog(`Tool Start: ${payload.name}`, "tool");
+      
+      // 重置 assistant buffer，确保工具调用前的文本被“封存”在当前消息中
+      // 接下来的文本将作为新消息创建，从而实现 text -> tool -> text 的穿插效果
+      assistantBufferRef.current = { id: "", text: "" };
+      pendingAssistantIdRef.current = null;
+      
       const startedAt = new Date().toISOString();
       setMessages((prev: ChatMessage[]) =>
         upsertToolMessage(prev, {
@@ -1722,12 +1724,21 @@ function App() {
               console.warn(
                 `未找到匹配的 assistant 消息: ${targetMessageId}，缓存文档等待消息创建`,
               );
+              // 如果没有找到匹配的消息，且 ID 看起来是 tool 的 ID（或者无效），
+              // 则认为这个文档属于“接下来的 assistant 消息”
+              // 尤其是 tool 刚执行完，紧接着会吐出一段 assistant 文本的情况
+              
               // 缓存文档，等消息创建后再绑定
               const existing = pendingWritesRef.current.get(targetMessageId) || [];
               pendingWritesRef.current.set(targetMessageId, [nextWrite, ...existing]);
+              
+              // 同时加入到 pendingWritesForNextRef，双重保险：
+              // 1. 如果后续消息 ID 确实匹配 targetMessageId（不太可能，因为那是 tool ID），则通过 pendingWritesRef 命中
+              // 2. 如果后续消息是全新的 ID（很可能），则通过 pendingWritesForNextRef 命中
+              pendingWritesForNextRef.current.push(nextWrite);
+              
               console.log(
-                `已缓存文档到 pendingWritesRef，message_id: ${targetMessageId}，当前缓存:`,
-                Array.from(pendingWritesRef.current.entries()),
+                `已缓存文档，等待后续消息认领。write_id: ${writeId}`
               );
               return prev;
             }
@@ -1757,6 +1768,7 @@ function App() {
         assistantBufferRef.current = { id: "", text: "" };
         pendingAssistantIdRef.current = null;
         pendingRefsRef.current = null;
+        pendingWritesForNextRef.current = [];
         void fetchChatSessions();
 
         // 每轮对话结束后刷新字数圆环；达到阈值则触发一次总结并同步更新圆环
@@ -2361,29 +2373,41 @@ function App() {
                           </div>
                         );
                       })()}
-                      <div className="message-actions">
-                        <button
-                          className="action-btn"
-                          type="button"
-                          onClick={() => handleCopyMessage(message)}
-                        >
-                          <Icons.Copy />
-                        </button>
-                        <button
-                          className="action-btn"
-                          type="button"
-                          onClick={() => handleLikeMessage(message)}
-                        >
-                          <Icons.ThumbUp />
-                        </button>
-                        <button
-                          className="action-btn"
-                          type="button"
-                          onClick={() => handleDislikeMessage(message)}
-                        >
-                          <Icons.ThumbDown />
-                        </button>
-                      </div>
+                      {(() => {
+                        const nextMsg = messages[index + 1];
+                        const isLastInList = !nextMsg;
+                        const isFollowedByUser = nextMsg?.role === "user";
+                        // 只有在是最后一条消息且非流式传输中，或者是本轮对话的最后一条（后面跟用户消息）时才显示操作栏
+                        const showActions = (isLastInList && !isStreaming) || isFollowedByUser;
+                        
+                        if (!showActions) return null;
+
+                        return (
+                          <div className="message-actions">
+                            <button
+                              className="action-btn"
+                              type="button"
+                              onClick={() => handleCopyMessage(message)}
+                            >
+                              <Icons.Copy />
+                            </button>
+                            <button
+                              className="action-btn"
+                              type="button"
+                              onClick={() => handleLikeMessage(message)}
+                            >
+                              <Icons.ThumbUp />
+                            </button>
+                            <button
+                              className="action-btn"
+                              type="button"
+                              onClick={() => handleDislikeMessage(message)}
+                            >
+                              <Icons.ThumbDown />
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
                         <div className="suggested-questions">
                           {message.suggestedQuestions.map((q, idx) => (
