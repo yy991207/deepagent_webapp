@@ -1546,36 +1546,35 @@ function App() {
         const id = pendingAssistantIdRef.current || createId();
         console.log("chat.delta 创建新消息，使用 ID:", id, "来源:", pendingAssistantIdRef.current ? "后端 message_id" : "前端 createId()");
         assistantBufferRef.current = { id, text: "" };
+
+        // 关键修复：在 setMessages 回调外部读取并清空 pending writes ref
+        // 避免 React state updater 双重调用时第二次看到已被清空的 ref
+        const claimedWrites: FilesystemWrite[] = [];
+        const pendingById = pendingWritesRef.current.get(id);
+        if (pendingById && pendingById.length > 0) {
+          claimedWrites.push(...pendingById);
+          pendingWritesRef.current.delete(id);
+        }
+        const nextWrites = [...pendingWritesForNextRef.current];
+        if (nextWrites.length > 0) {
+          console.log(`新消息 ${id} 认领了 ${nextWrites.length} 个待绑定文档`);
+          claimedWrites.push(...nextWrites);
+          pendingWritesForNextRef.current = [];
+        }
+
         setMessages((prev: ChatMessage[]) => {
           const exists = prev.some((m) => m.id === id);
           if (exists) {
-            console.log("消息已存在，更新内容:", id);
+            // 消息已存在，合并 writes
             return prev.map((m) =>
               m.id === id && m.role === "assistant"
-                ? { ...m, timestamp, isPending: false, references: pendingRefsRef.current || m.references }
+                ? { ...m, timestamp, isPending: false, references: pendingRefsRef.current || m.references, ...(claimedWrites.length > 0 ? { writes: [...(Array.isArray((m as any).writes) ? (m as any).writes : []), ...claimedWrites] } : {}) }
                 : m
             );
           }
-          console.log("创建新 assistant 消息:", id);
+          console.log("创建新 assistant 消息:", id, claimedWrites.length > 0 ? `带 ${claimedWrites.length} 个文档` : "");
           
-          // 检查是否有待绑定的文档（通过 ID 匹配）
-          const pendingWrites = pendingWritesRef.current.get(id) || [];
-          
-          // 检查是否有待绑定的“下一个”文档（无 ID 匹配，FIFO 认领）
-          const nextWrites = pendingWritesForNextRef.current;
-          if (nextWrites.length > 0) {
-            console.log(`新消息 ${id} 认领了 ${nextWrites.length} 个待绑定文档`);
-            pendingWrites.push(...nextWrites);
-            pendingWritesForNextRef.current = [];
-          }
-
-          if (pendingWrites && pendingWrites.length > 0) {
-            console.log(`发现待绑定文档 ${pendingWrites.length} 个，立即绑定到消息 ${id}`);
-            pendingWritesRef.current.delete(id);
-            return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [], writes: pendingWrites }];
-          }
-          
-          return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [] }];
+          return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [], ...(claimedWrites.length > 0 ? { writes: claimedWrites } : {}) }];
         });
       }
       assistantBufferRef.current.text += payload.text;
@@ -1649,7 +1648,7 @@ function App() {
           try {
             out = JSON.parse(out);
           } catch (e) {
-            console.warn("文档写入工具 output 不是有效的 JSON:", out);
+            // write_file 的 output 是纯文本（如 "Updated file /workspace/xxx"），不是 JSON，这是正常的
           }
         }
 
@@ -1681,80 +1680,37 @@ function App() {
             return updated;
           });
 
-          // 绑定到当前 message_id 对应的 assistant 消息
-          const targetMessageId = (payload as any).message_id || currentMessageIdRef.current;
-          console.log("文档写入工具绑定到 message_id:", targetMessageId);
-
-          setMessages((prev) => {
-            console.log(
-              "绑定文档时的消息列表:",
-              prev.map((m) => ({ id: m.id, role: m.role })),
-            );
-
-            if (!targetMessageId) {
-              console.warn("没有 targetMessageId，使用回退逻辑");
-              // 如果没有 message_id，回退到旧逻辑：绑定到最后一条 assistant 消息
-              const lastAssistantIndex = [...prev]
-                .map((m, i) => ({ m, i }))
-                .reverse()
-                .find((x) => x.m.role === "assistant")?.i;
-
-              if (lastAssistantIndex === undefined) {
-                console.warn("没有找到 assistant 消息");
+          // 绑定文档到对应的 assistant 消息
+          const rawMessageId = (payload as any).message_id || currentMessageIdRef.current;
+          
+          // 关键逻辑：如果 assistant buffer 已被重置（工具调用中间），
+          // 说明当前处于 tool 执行完毕、下一段 assistant 文本还未开始的间隙。
+          // 此时 rawMessageId 是初始的 message.start ID，但由于交叉拆分，下一段文本会创建新消息。
+          // 文档卡片应跟随“我已将内容整理成文档”这段文本，而不是绑到第一段。
+          const bufferIsReset = !assistantBufferRef.current.id;
+          
+          if (bufferIsReset) {
+            // buffer 已重置，缓存到 pendingWritesForNextRef，等下一个 chat.delta 创建新消息时认领
+            console.log(`文档写入工具: buffer 已重置，缓存文档等待下一条 assistant 消息认领。write_id: ${writeId}`);
+            pendingWritesForNextRef.current.push(nextWrite);
+          } else {
+            // buffer 未重置，绑定到当前浣活的 assistant 消息
+            const activeId = assistantBufferRef.current.id;
+            console.log(`文档写入工具: 绑定到当前浣活 assistant 消息: ${activeId}`);
+            setMessages((prev) => {
+              const matched = prev.find((m) => m.id === activeId && m.role === "assistant");
+              if (!matched) {
+                pendingWritesForNextRef.current.push(nextWrite);
                 return prev;
               }
-
-              return prev.map((m, i) => {
-                if (i !== lastAssistantIndex || m.role !== "assistant") {
-                  return m;
-                }
-                const existing = Array.isArray((m as any).writes)
-                  ? ((m as any).writes as FilesystemWrite[])
-                  : [];
+              return prev.map((m) => {
+                if (m.id !== activeId || m.role !== "assistant") return m;
+                const existing = Array.isArray((m as any).writes) ? ((m as any).writes as FilesystemWrite[]) : [];
                 const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
                 return { ...(m as any), writes: merged };
               });
-            }
-
-            // 找到 id 匹配的 assistant 消息
-            const matchedMessage = prev.find(
-              (m) => m.id === targetMessageId && m.role === "assistant",
-            );
-            if (!matchedMessage) {
-              console.warn(
-                `未找到匹配的 assistant 消息: ${targetMessageId}，缓存文档等待消息创建`,
-              );
-              // 如果没有找到匹配的消息，且 ID 看起来是 tool 的 ID（或者无效），
-              // 则认为这个文档属于“接下来的 assistant 消息”
-              // 尤其是 tool 刚执行完，紧接着会吐出一段 assistant 文本的情况
-              
-              // 缓存文档，等消息创建后再绑定
-              const existing = pendingWritesRef.current.get(targetMessageId) || [];
-              pendingWritesRef.current.set(targetMessageId, [nextWrite, ...existing]);
-              
-              // 同时加入到 pendingWritesForNextRef，双重保险：
-              // 1. 如果后续消息 ID 确实匹配 targetMessageId（不太可能，因为那是 tool ID），则通过 pendingWritesRef 命中
-              // 2. 如果后续消息是全新的 ID（很可能），则通过 pendingWritesForNextRef 命中
-              pendingWritesForNextRef.current.push(nextWrite);
-              
-              console.log(
-                `已缓存文档，等待后续消息认领。write_id: ${writeId}`
-              );
-              return prev;
-            }
-
-            return prev.map((m) => {
-              if (m.id !== targetMessageId || m.role !== "assistant") {
-                return m;
-              }
-              const existing = Array.isArray((m as any).writes)
-                ? ((m as any).writes as FilesystemWrite[])
-                : [];
-              const merged = [nextWrite, ...existing.filter((w) => w.write_id !== writeId)];
-              console.log(`文档已绑定到消息 ${targetMessageId}:`, merged);
-              return { ...(m as any), writes: merged };
             });
-          });
+          }
         }
       }
       return;

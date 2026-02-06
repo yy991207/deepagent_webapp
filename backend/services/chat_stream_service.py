@@ -502,6 +502,21 @@ class ChatStreamService:
                             # 下载失败时降级为只存储文本内容，不阻塞整个流程
                             logger.warning(f"从 sandbox 下载二进制文件失败，降级为文本存储: {safe_path}, error={e}")
 
+                    # 对于文本文件，如果 LLM 没有传入 content，从 sandbox 自动读取
+                    effective_content = str(content or "")
+                    if not effective_content.strip() and file_ext not in BINARY_FILE_TYPES and sandbox_backend is not None:
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(
+                                sandbox_backend.aread_bytes(safe_path),
+                                sandbox_backend._owner_loop
+                            )
+                            file_bytes = future.result(timeout=60)
+                            effective_content = file_bytes.decode('utf-8')
+                            file_size = len(file_bytes)
+                            logger.info(f"从 sandbox 自动读取文本文件成功: {safe_path}, size={file_size}")
+                        except Exception as e:
+                            logger.warning(f"从 sandbox 自动读取文本文件失败: {safe_path}, error={e}")
+
                     metadata = {
                         "title": safe_title,
                         "type": file_type,
@@ -511,10 +526,15 @@ class ChatStreamService:
                     if binary_content:
                         metadata["has_binary"] = True
 
+                    # 计算最终文件大小（优先用已知的 file_size，否则按文本内容计算）
+                    final_size = file_size if file_size is not None else len(effective_content.encode('utf-8')) if effective_content else 0
+                    if final_size and "size" not in metadata:
+                        metadata["size"] = final_size
+
                     write_id = mongo.save_filesystem_write(
                         session_id=thread_id,
                         file_path=safe_path,
-                        content=str(content or ""),
+                        content=effective_content,
                         binary_content=binary_content,
                         metadata=metadata,
                     )
@@ -523,6 +543,8 @@ class ChatStreamService:
                         "write_id": write_id,
                         "title": safe_title,
                         "type": file_type,
+                        "size": final_size,
+                        "file_path": safe_path,
                     }
                 except Exception as e:
                     logger.exception(f"save_filesystem_write failed: {e}")
