@@ -43,7 +43,7 @@ from backend.prompts.chat_prompts import (
     suggested_questions_prompt,
 )
 
-from backend.database.mongo_manager import get_mongo_manager
+from backend.database.mongo_manager import get_mongo_manager, get_beijing_time
 from backend.services.chat_service import ChatService
 from backend.services.checkpoint_service import CheckpointService
 from backend.services.mcp_tool_service import get_mcp_tool_service
@@ -599,6 +599,7 @@ class ChatStreamService:
             # 准备流式输入和状态变量
             stream_input = {"messages": [HumanMessage(content=effective_user_text)]}
             assistant_accum: list[str] = []
+            full_assistant_accum: list[str] = []  # 完整文本，用于 memory
             stream_event_service = AgentStreamEventService(mongo=mongo)
             stream_state = stream_event_service.init_state()
 
@@ -628,6 +629,9 @@ class ChatStreamService:
                                 yield {"type": "session.status", "status": "cancelled"}
                                 break
 
+                            # 记录 parse 前的时间戳，用于确保 assistant 文本段的 created_at 早于 tool 消息
+                            pre_parse_time = get_beijing_time()
+
                             parsed = stream_event_service.parse_chunk(
                                 chunk=chunk,
                                 state=stream_state,
@@ -636,10 +640,30 @@ class ChatStreamService:
                                 current_message_id=current_message_id,
                                 rag_references_out=rag_references,
                             )
-                            for ev in parsed.events:
-                                yield ev
+
+                            # 先累积本轮 delta（使文本在检测 tool.start 前已入 accum）
                             for delta in parsed.assistant_deltas:
                                 assistant_accum.append(str(delta))
+                                full_assistant_accum.append(str(delta))
+
+                            # 关键逻辑：如果本轮事件包含 tool.start，把已累积的文本段
+                            # 保存为独立的 assistant 消息（created_at < tool 消息），实现历史交叉
+                            if any(ev.get("type") == "tool.start" for ev in parsed.events):
+                                segment_text = "".join(assistant_accum).strip()
+                                if segment_text:
+                                    try:
+                                        chat_service.save_assistant_message(
+                                            thread_id=thread_id,
+                                            assistant_id=assistant_id,
+                                            content=segment_text,
+                                            created_at=pre_parse_time,
+                                        )
+                                    except Exception:
+                                        logger.debug("save assistant segment failed", exc_info=True)
+                                    assistant_accum = []
+
+                            for ev in parsed.events:
+                                yield ev
                         break
                     except Exception as exc:
                         should_continue, retry_count, rate_retry_count, stream_state, err_msg = await self._handle_stream_error(
@@ -666,15 +690,19 @@ class ChatStreamService:
                     if stream_state.pending_text_deltas:
                         for delta in stream_state.pending_text_deltas:
                             assistant_accum.append(str(delta))
+                            full_assistant_accum.append(str(delta))
                             yield {"type": "chat.delta", "text": str(delta)}
                         stream_state.pending_text_deltas = []
 
+                    # 最后一段 assistant 文本（可能是唯一一段，也可能是最后一段）
                     assistant_text = "".join(assistant_accum).strip()
+                    # 完整文本用于 memory 和推荐问题
+                    full_text = "".join(full_assistant_accum).strip()
                     suggested_questions: list[str] = []
 
-                    if assistant_text:
+                    if full_text:
                         try:
-                            question_prompt = suggested_questions_prompt(text, assistant_text)
+                            question_prompt = suggested_questions_prompt(text, full_text)
 
                             question_msg = await model.ainvoke([HumanMessage(content=question_prompt)])
                             questions_text = getattr(question_msg, "content", "") or ""
@@ -689,6 +717,7 @@ class ChatStreamService:
                         except Exception:
                             pass
 
+                    if assistant_text:
                         chat_service.save_assistant_message(
                             thread_id=thread_id,
                             assistant_id=assistant_id,
@@ -697,11 +726,12 @@ class ChatStreamService:
                             references=rag_references,
                             suggested_questions=suggested_questions,
                         )
+                    if full_text:
                         chat_service.save_chat_memory(
                             thread_id=thread_id,
                             assistant_id=assistant_id,
                             user_text=str(text),
-                            assistant_text=assistant_text,
+                            assistant_text=full_text,
                         )
                 except Exception:
                     pass

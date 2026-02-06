@@ -38,7 +38,7 @@ export function registerAllRenderers(): void {
       const query = (args as any)?.query || (args as any)?.q || "";
       return query ? `搜索: ${query}` : "网络搜索";
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
     getRunningHint: (args) => {
       const query = (args as any)?.query || (args as any)?.q || "";
       return `正在搜索${query ? `：${query}` : "..."}`;
@@ -54,7 +54,7 @@ export function registerAllRenderers(): void {
       const query = (args as any)?.query || (args as any)?.q || "";
       return query ? `检索: ${query}` : "知识检索";
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
     getRunningHint: (args) => {
       const query = (args as any)?.query || (args as any)?.q || "";
       return `正在检索${query ? `：${query}` : "..."}`;
@@ -67,7 +67,7 @@ export function registerAllRenderers(): void {
     Renderer: TodosRenderer,
     icon: Icons.Task,
     getDisplayName: () => "任务列表",
-    defaultExpanded: true,
+    defaultExpanded: false,
   });
 
   // Shell / Bash 执行
@@ -158,7 +158,7 @@ export function registerAllRenderers(): void {
       const filename = path.split("/").pop() || "文件";
       return `读取: ${filename}`;
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
   });
 
   // 文件写入
@@ -175,7 +175,7 @@ export function registerAllRenderers(): void {
       const filename = path.split("/").pop() || "文件";
       return `写入: ${filename}`;
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
   });
 
   // 文件编辑
@@ -221,7 +221,7 @@ export function registerAllRenderers(): void {
         return url ? `抓取: ${url}` : "URL 抓取";
       }
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
     getRunningHint: (args) => {
       const url = (args as any)?.url || "";
       return `正在抓取${url ? `：${url}` : "..."}`;
@@ -260,7 +260,7 @@ export function registerAllRenderers(): void {
       const shortName = name.length > 30 ? name.slice(0, 30) + "..." : name;
       return shortName ? `子任务: ${shortName}` : "子任务分派";
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
     getRunningHint: (args) => {
       const name = (args as any)?.name || (args as any)?.description || "";
       return name ? `正在执行：${name}` : "正在执行子任务...";
@@ -277,7 +277,7 @@ export function registerAllRenderers(): void {
       const shortPrompt = prompt.length > 30 ? prompt.slice(0, 30) + "..." : prompt;
       return shortPrompt ? `生成图片: ${shortPrompt}` : "图片生成";
     },
-    defaultExpanded: true,
+    defaultExpanded: false,
   });
 
   // 数据库查询
