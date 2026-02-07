@@ -2076,6 +2076,59 @@ function App() {
     }
   };
 
+  const collectWritesForAssistantBlock = (index: number): FilesystemWrite[] => {
+    const current = messages[index];
+    if (!current || current.role !== "assistant") {
+      return [];
+    }
+    // 关键逻辑：同一轮 assistant 连续段只在最后一条渲染文档卡片，避免卡片插到正文中间
+    let prevUserIndex = -1;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "user") {
+        prevUserIndex = i;
+        break;
+      }
+    }
+    let nextUserIndex = messages.length;
+    for (let i = index + 1; i < messages.length; i += 1) {
+      if (messages[i].role === "user") {
+        nextUserIndex = i;
+        break;
+      }
+    }
+
+    let lastAssistantIndex = -1;
+    for (let i = nextUserIndex - 1; i > prevUserIndex; i -= 1) {
+      if (messages[i].role === "assistant") {
+        lastAssistantIndex = i;
+        break;
+      }
+    }
+
+    if (lastAssistantIndex !== index) {
+      return [];
+    }
+
+    const merged: FilesystemWrite[] = [];
+    const seen = new Set<string>();
+    for (let i = prevUserIndex + 1; i < nextUserIndex; i += 1) {
+      if (messages[i].role !== "assistant") {
+        continue;
+      }
+      const writes = Array.isArray((messages[i] as any).writes)
+        ? ((messages[i] as any).writes as FilesystemWrite[])
+        : [];
+      for (const w of writes) {
+        if (!w || !w.write_id || seen.has(w.write_id)) {
+          continue;
+        }
+        seen.add(w.write_id);
+        merged.push(w);
+      }
+    }
+    return merged;
+  };
+
   return (
     <div className="app-root">
       {/* Main Body (Three Columns) */}
@@ -2421,9 +2474,7 @@ function App() {
                         </div>
                       </div>
                       {(() => {
-                        const boundWrites = Array.isArray((message as any).writes)
-                          ? ((message as any).writes as FilesystemWrite[])
-                          : [];
+                        const boundWrites = collectWritesForAssistantBlock(index);
 
                         if (!boundWrites.length) {
                           return null;
