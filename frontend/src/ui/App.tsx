@@ -45,6 +45,133 @@ import { ToolMessage } from "./components/ToolMessage";
 import { AssistantContent } from "./components/Chat/AssistantContent";
 
 
+import JSZip from "jszip";
+
+// --- Components ---
+
+function OfficeViewer({
+  fileType,
+  content,
+  binaryContent,
+  title,
+  downloadUrl,
+}: {
+  fileType: string;
+  content: string;
+  binaryContent?: string;
+  title: string;
+  downloadUrl: string;
+}) {
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    // 仅尝试解析 PPTX
+    if (fileType !== "pptx") return;
+    
+    const data = binaryContent || content;
+    if (!data) return;
+
+    setLoading(true);
+    setError(false);
+
+    (async () => {
+      try {
+        // Base64 to Blob/ArrayBuffer
+        const byteCharacters = atob(data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        
+        const zip = await JSZip.loadAsync(byteArray);
+        
+        // 尝试查找缩略图
+        // 常见的路径: docProps/thumbnail.jpeg
+        const thumbFile = zip.file("docProps/thumbnail.jpeg");
+        
+        if (thumbFile) {
+          const thumbData = await thumbFile.async("base64");
+          setThumbnail(`data:image/jpeg;base64,${thumbData}`);
+        } else {
+          // 如果没有缩略图，尝试找第一张 slide 的预览图？(通常 PPTX 不直接包含 slide 预览图)
+          // 暂时只支持 thumbnail.jpeg
+          setError(true);
+        }
+      } catch (e) {
+        console.error("PPTX 解析失败:", e);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [fileType, binaryContent, content]);
+
+  const isPPTX = fileType === "pptx";
+  const showThumbnail = isPPTX && thumbnail && !loading;
+
+  return (
+    <div style={{ 
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      justifyContent: "center", 
+      height: "calc(100vh - 200px)",
+      minHeight: "400px",
+      gap: "24px",
+      color: "#666",
+      background: "#f8f9fa",
+      borderRadius: "8px",
+      border: "1px solid #e0e0e0",
+      padding: "20px",
+      overflow: "hidden"
+    }}>
+      {showThumbnail ? (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", maxWidth: "100%", maxHeight: "100%" }}>
+          <div style={{ fontSize: "14px", fontWeight: 600 }}>文档预览</div>
+          <img 
+            src={thumbnail!} 
+            alt="PPTX Thumbnail" 
+            style={{ 
+              maxWidth: "100%", 
+              maxHeight: "calc(100vh - 300px)", 
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              borderRadius: "4px",
+              border: "1px solid #ddd"
+            }} 
+          />
+          <div style={{ fontSize: "12px", opacity: 0.8 }}>提示：此预览仅显示文档缩略图，完整内容请下载查看</div>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: "64px", opacity: 0.5 }}>
+            {loading ? <Icons.Sparkles /> : <Icons.Drive />}
+          </div>
+          <div style={{ fontSize: "16px" }}>
+            {loading ? "正在解析预览..." : `此文件 (${fileType}) 暂不支持在线预览`}
+          </div>
+        </>
+      )}
+      
+      <button 
+        className="add-source-action primary"
+        onClick={() => {
+          const link = document.createElement("a");
+          link.href = downloadUrl;
+          link.download = title.endsWith(`.${fileType}`) ? title : `${title}.${fileType}`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }}
+      >
+        下载查看
+      </button>
+    </div>
+  );
+}
+
 function MemoryProgressRing({ ratio, chars, title }: { ratio: number; chars: number; title: string }) {
   const size = 16;
   const stroke = 2;
@@ -3399,41 +3526,18 @@ function App() {
                         );
                       }
                       
-                      // Office 文档：提示下载
+                      // Office 文档：使用 OfficeViewer
                       if (["ppt", "pptx", "doc", "docx", "xls", "xlsx"].includes(fileType)) {
+                        const downloadUrl = `/api/filesystem/write/${encodeURIComponent(writeDetail.write_id)}/download?session_id=${encodeURIComponent(sessionId)}`;
                         return (
-                          <div style={{ 
-                            display: "flex", 
-                            flexDirection: "column", 
-                            alignItems: "center", 
-                            justifyContent: "center", 
-                            height: "calc(100vh - 200px)",
-                            minHeight: "400px",
-                            gap: "24px",
-                            color: "#666",
-                            background: "#f8f9fa",
-                            borderRadius: "8px",
-                            border: "1px solid #e0e0e0"
-                          }}>
-                            <div style={{ fontSize: "64px", opacity: 0.5 }}><Icons.Drive /></div>
-                            <div style={{ fontSize: "16px" }}>此文件 ({fileType}) 暂不支持在线预览</div>
-                            <button 
-                              className="add-source-action primary"
-                              onClick={() => {
-                                const downloadUrl = `/api/filesystem/write/${encodeURIComponent(writeDetail.write_id)}/download?session_id=${encodeURIComponent(sessionId)}`;
-                                const link = document.createElement("a");
-                                link.href = downloadUrl;
-                                link.download = writeDetail.title.endsWith(`.${fileType}`) ? writeDetail.title : `${writeDetail.title}.${fileType}`;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }}
-                            >
-                              下载查看
-                            </button>
-                          </div>
+                          <OfficeViewer 
+                            fileType={fileType}
+                            content={writeDetail.content}
+                            binaryContent={writeDetail.binary_content}
+                            title={writeDetail.title}
+                            downloadUrl={downloadUrl}
+                          />
                         );
-                      }
                       // 其他文件：使用 AssistantContent 渲染（文本/Markdown）
                       return (
                         <AssistantContent
