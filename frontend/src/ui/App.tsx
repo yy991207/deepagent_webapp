@@ -3538,6 +3538,7 @@ function App() {
                             downloadUrl={downloadUrl}
                           />
                         );
+                      }
                       // 其他文件：使用 AssistantContent 渲染（文本/Markdown）
                       return (
                         <AssistantContent
