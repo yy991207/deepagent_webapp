@@ -87,8 +87,8 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       DEEPAGENTS_DATA_DIR: ${DEEPAGENTS_DATA_DIR:-/data}
-      PODCAST_AGENT_URL: ${PODCAST_AGENT_URL:-http://podcast-agent:8888}
-      CALLBACK_BASE_URL: ${CALLBACK_BASE_URL:-http://backend:7777}
+      PODCAST_AGENT_URL: http://podcast-agent:8888
+      CALLBACK_BASE_URL: http://backend:7777
       OPENSANDBOX_DOMAIN: host.docker.internal:8080
       SANDBOX_DOMAIN: host.docker.internal:8080
       SANDBOX_READY_TIMEOUT_SECONDS: "180"

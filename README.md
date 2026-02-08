@@ -20,6 +20,10 @@
 - React 18 + Vite 5
 - Tailwind CSS 4 + tailwind-merge
 - Radix UI + lucide-react
+
+## 主要语言
+- 后端语言：Python 3.11
+- 前端语言：TypeScript（React + Vite）
  
  ## 你能用它做什么
  - 聊天对话（支持流式输出）

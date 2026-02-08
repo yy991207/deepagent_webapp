@@ -1200,6 +1200,10 @@ function App() {
       setPodcastConfigOpen(true);
       return;
     }
+    if (!podcastSelectedEpisode) {
+      setPodcastConfigOpen(true);
+      return;
+    }
     if (!podcastEpisodeName.trim()) {
       setPodcastConfigOpen(true);
       return;
@@ -1218,7 +1222,7 @@ function App() {
         speaker_profile: podcastSelectedSpeaker,
         episode_name: podcastEpisodeName.trim(),
         source_ids: selectedSourceIds,
-        briefing_suffix: podcastBriefingSuffix.trim() || undefined,
+                briefing_suffix: podcastBriefingSuffix.trim() || undefined,
       },
       meta_info: {
         session_id: sessionId,
@@ -2982,7 +2986,7 @@ function App() {
 
             <div className="podcast-config-body">
               <div className="podcast-config-row">
-                <div className="ref-section-title">发言人</div>
+                <div className="ref-section-title">发言人 *</div>
                 <select
                   className="podcast-config-select"
                   value={podcastSelectedSpeaker}
@@ -2996,13 +3000,13 @@ function App() {
               </div>
 
               <div className="podcast-config-row">
-                <div className="ref-section-title">节目配置</div>
+                <div className="ref-section-title">节目配置 *</div>
                 <select
                   className="podcast-config-select"
                   value={podcastSelectedEpisode}
                   onChange={(e) => setPodcastSelectedEpisode(e.currentTarget.value)}
                 >
-                  <option value="">请选择（可选）</option>
+                  <option value="">请选择</option>
                   {podcastEpisodeProfiles.map((p) => (
                     <option key={p.id} value={p.name}>{p.name}</option>
                   ))}
@@ -3010,7 +3014,7 @@ function App() {
               </div>
 
               <div className="podcast-config-row">
-                <div className="ref-section-title">播客标题</div>
+                <div className="ref-section-title">播客标题 *</div>
                 <input
                   className="podcast-config-input"
                   value={podcastEpisodeName}
@@ -3030,7 +3034,7 @@ function App() {
               </div>
 
               <div className="podcast-config-row">
-                <div className="ref-section-title">数据源</div>
+                <div className="ref-section-title">数据源 *</div>
                 <button
                   className="podcast-source-select-btn"
                   type="button"

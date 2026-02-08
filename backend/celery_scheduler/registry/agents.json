@@ -4,7 +4,7 @@
       "agent_id": "podcast",
       "name": "Podcast Generation Agent",
       "type": "podcast",
-      "url": "http://localhost:8888",
+      "url": "http://podcast-agent:8888",
       "endpoints": {
         "run": "/api/agent/run",
         "cancel": "/api/agent/cancel",
