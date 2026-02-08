@@ -1,0 +1,144 @@
+services:
+  mongo:
+    image: mongo:6
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      DEEPAGENTS_MONGO_DB: ${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      DEEPAGENTS_MONGO_URL: mongodb://mongo:27017/${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      DEEPAGENTS_DATA_DIR: ${DEEPAGENTS_DATA_DIR:-/data}
+      RAG_EMBEDDING_PROVIDER: dashscope
+      RAG_DASHSCOPE_EMBEDDING_MODEL: ${RAG_DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v2}
+      OPENSANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_READY_TIMEOUT_SECONDS: "180"
+      SANDBOX_SKIP_HEALTH_CHECK: "1"
+    depends_on:
+      - mongo
+      - redis
+    ports:
+      - "7777:7777"
+    volumes:
+      - deepagents-data:/data
+
+  podcast-agent:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      DEEPAGENTS_MONGO_DB: ${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      DEEPAGENTS_MONGO_URL: mongodb://mongo:27017/${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      DEEPAGENTS_DATA_DIR: ${DEEPAGENTS_DATA_DIR:-/data}
+      PODCAST_AGENT_HOST: ${PODCAST_AGENT_HOST:-0.0.0.0}
+      PODCAST_AGENT_PORT: ${PODCAST_AGENT_PORT:-8888}
+      OPENSANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_READY_TIMEOUT_SECONDS: "180"
+      SANDBOX_SKIP_HEALTH_CHECK: "1"
+    depends_on:
+      - mongo
+      - redis
+    command: ["uvicorn", "backend.services.podcast_agent_service:app", "--host", "0.0.0.0", "--port", "8888", "--log-level", "info"]
+    ports:
+      - "8888:8888"
+    volumes:
+      - deepagents-data:/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      DEEPAGENTS_MONGO_DB: ${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      DEEPAGENTS_MONGO_URL: mongodb://mongo:27017/${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      DEEPAGENTS_DATA_DIR: ${DEEPAGENTS_DATA_DIR:-/data}
+      PODCAST_AGENT_URL: ${PODCAST_AGENT_URL:-http://podcast-agent:8888}
+      CALLBACK_BASE_URL: ${CALLBACK_BASE_URL:-http://backend:7777}
+      OPENSANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_READY_TIMEOUT_SECONDS: "180"
+      SANDBOX_SKIP_HEALTH_CHECK: "1"
+    depends_on:
+      - mongo
+      - redis
+      - backend
+      - podcast-agent
+    command: ["python", "-m", "celery", "-A", "backend.celery_scheduler", "worker", "--loglevel=info", "--queues=celery,podcast"]
+    volumes:
+      - deepagents-data:/data
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      DEEPAGENTS_MONGO_DB: ${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      DEEPAGENTS_MONGO_URL: mongodb://mongo:27017/${DEEPAGENTS_MONGO_DB:-deepagents_web}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      DEEPAGENTS_DATA_DIR: ${DEEPAGENTS_DATA_DIR:-/data}
+      OPENSANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_DOMAIN: host.docker.internal:8080
+      SANDBOX_READY_TIMEOUT_SECONDS: "180"
+      SANDBOX_SKIP_HEALTH_CHECK: "1"
+    depends_on:
+      - mongo
+      - redis
+      - backend
+    command: ["python", "-m", "celery", "-A", "backend.celery_scheduler", "beat", "--loglevel=info", "--schedule=/data/celerybeat-schedule"]
+    volumes:
+      - deepagents-data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+
+volumes:
+  mongo-data:
+  redis-data:
+  deepagents-data:

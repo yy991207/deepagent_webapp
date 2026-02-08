@@ -238,6 +238,15 @@ class AgentStreamEventService:
                         chunk_name = block.get("name")
                         chunk_id = block.get("id")
                         chunk_args = block.get("args")
+                        # 兼容异常输出：有些模型会把普通文本误标为 tool_call_chunk，且 name/id 为空
+                        # 这种情况需要回退为普通文本，避免正文被吞掉
+                        if not chunk_name and not chunk_id and isinstance(chunk_args, str) and chunk_args:
+                            if state.saw_tool_call and state.active_tool_ids:
+                                state.pending_text_deltas.append(str(chunk_args))
+                            else:
+                                assistant_deltas.append(str(chunk_args))
+                                events.append({"type": "chat.delta", "text": str(chunk_args)})
+                            return
                         # 记录 LLM 原始 tool_call 参数，便于排查空参数问题
                         logger.debug(
                             "llm tool_call raw | name=%s | id=%s | args=%s",

@@ -284,6 +284,19 @@ async def create_opensandbox(
         or os.getenv("OPENSANDBOX_REQUEST_TIMEOUT_SECONDS")
         or "10"
     )
+    # 关键逻辑：健康检查超时时间可配置，避免慢启动导致误判失败
+    ready_timeout_seconds = int(
+        os.getenv("SANDBOX_READY_TIMEOUT_SECONDS")
+        or os.getenv("OPENSANDBOX_READY_TIMEOUT_SECONDS")
+        or "30"
+    )
+    # 关键逻辑：必要时可跳过健康检查，避免创建阶段卡死
+    skip_health_check_raw = (
+        os.getenv("SANDBOX_SKIP_HEALTH_CHECK")
+        or os.getenv("OPENSANDBOX_SKIP_HEALTH_CHECK")
+        or ""
+    ).strip().lower()
+    skip_health_check = skip_health_check_raw in {"1", "true", "yes", "on"}
 
     if image is None:
         image = (
@@ -305,6 +318,8 @@ async def create_opensandbox(
     sandbox = await Sandbox.create(
         image,
         timeout=timedelta(seconds=timeout_seconds),
+        ready_timeout=timedelta(seconds=ready_timeout_seconds),
+        skip_health_check=skip_health_check,
         connection_config=config,
     )
 

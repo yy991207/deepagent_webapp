@@ -547,6 +547,19 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
                 self._persist_dir / "index_store.json"
             ).exists()
 
+            # 没有任何文档时不构建索引，避免后续加载报错
+            if not current_docs:
+                if index_exists and self._is_manifest_changed(existing, current_docs):
+                    # 文档被清空时，清理旧索引，防止返回过期内容
+                    try:
+                        import shutil
+                        shutil.rmtree(self._persist_dir)
+                    except Exception:
+                        pass
+                    self._write_manifest(current_docs)
+                logger.info("RAG skip index build: no documents. persist_dir=%s", str(self._persist_dir))
+                return
+
             # 检查索引是否需要重建：索引文件存在且文件未变更时跳过
             if index_exists and not self._is_manifest_changed(existing, current_docs):
                 logger.info(
@@ -631,6 +644,14 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             from llama_index.core import StorageContext, load_index_from_storage  # type: ignore
         except Exception:
             logger.exception("RAG retrieve import failed. persist_dir=%s", str(self._persist_dir))
+            return []
+
+        # 索引不存在时直接返回空，避免 FileNotFoundError
+        index_exists = (self._persist_dir / "docstore.json").exists() or (
+            self._persist_dir / "index_store.json"
+        ).exists()
+        if not index_exists:
+            logger.info("RAG index missing, skip retrieve. persist_dir=%s", str(self._persist_dir))
             return []
 
         try:

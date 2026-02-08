@@ -95,12 +95,50 @@
  └── uvicorn_log_config.yaml            # uvicorn 日志配置
  ```
  
- ## 环境要求
+## 环境要求
  - Python 3.11+
  - Node.js 18+
  - MongoDB 5.0+
  - Redis 6.0+（Celery 消息队列需要）
  - 建议使用 conda 环境：`deepagent`
+
+## Docker 部署
+1. 准备好根目录的 `.env`，至少包含 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`。
+2. 在项目根目录执行：`docker compose up -d --build`。
+3. 前端访问地址：`http://localhost:8081`（8080 已留给 OpenSandbox）。
+4. 后端 API 地址：`http://localhost:7777`。
+5. 如果不需要播客相关能力，可以在 `docker-compose.yml` 里注释 `worker`、`beat`、`podcast-agent` 三个服务。
+
+### Docker 端口映射
+- 前端：`8081 -> 80`
+- 后端：`7777 -> 7777`
+- MongoDB：`27018 -> 27017`
+- Redis：`6380 -> 6379`
+- Podcast Agent：`8888 -> 8888`
+
+### Docker 内置存储说明
+- `docker-compose.yml` 内部强制使用容器内的 `mongo:27017`（不走 `.env` 的 `MONGODB_URI`）。
+- 如果你想接外部 MongoDB/Redis，需要手动修改 `docker-compose.yml` 的对应环境变量。
+
+### Docker + OpenSandbox（必读）
+当前后端在容器内访问 OpenSandbox，默认指向宿主机 `host.docker.internal:8080`，并跳过健康检查：
+- `OPENSANDBOX_DOMAIN` / `SANDBOX_DOMAIN`：`host.docker.internal:8080`
+- `SANDBOX_SKIP_HEALTH_CHECK=1`
+
+如果你用本机 OpenSandbox server，需要满足两点：
+1. OpenSandbox server 监听地址必须是 `0.0.0.0`，确保容器能访问到服务端口。
+2. OpenSandbox server 需要返回 **容器可访问的 execd 端点**，已通过 `router.domain` 实现。示例（在 `~/.sandbox.toml`）：  
+   ```toml
+   [router]
+   domain = "host.docker.internal"
+   ```
+   说明：此项依赖 OpenSandbox server 对 `router.domain` 的支持，我们已在本机 OpenSandbox server 做过补丁。
+
+### Docker + RAG Embedding 配置
+为了避免 DashScope 兼容接口缺失 `text-embedding-3-small` 导致索引构建失败，Docker 默认强制：
+- `RAG_EMBEDDING_PROVIDER=dashscope`
+- `RAG_DASHSCOPE_EMBEDDING_MODEL=text-embedding-v2`
+请确保 `.env` 中有 `DASHSCOPE_API_KEY` 或 `OPENAI_API_KEY` 可用于 embedding 调用。
  
  ## 安装依赖
  
@@ -148,11 +186,16 @@ OPENAI_TEMPERATURE=0.7
  ### 可选（用到对应能力再配）
  - `TAVILY_API_KEY`：开启联网搜索工具
  
- ### RAG 相关（可选）
- - `RAG_EMBEDDING_PROVIDER`：embedding 提供商（`dashscope`/`openai`/`hf`）
- - `RAG_DASHSCOPE_EMBEDDING_MODEL`：DashScope embedding 模型（默认 `text-embedding-v2`）
- - `RAG_HF_EMBEDDING_MODEL`：HuggingFace embedding 模型（默认 `BAAI/bge-small-zh-v1.5`）
- - `OPENAI_EMBEDDING_MODEL`：OpenAI embedding 模型（默认 `text-embedding-3-small`）
+### RAG 相关（可选）
+- `RAG_EMBEDDING_PROVIDER`：embedding 提供商（`dashscope`/`openai`/`hf`）
+- `RAG_DASHSCOPE_EMBEDDING_MODEL`：DashScope embedding 模型（默认 `text-embedding-v2`）
+- `RAG_HF_EMBEDDING_MODEL`：HuggingFace embedding 模型（默认 `BAAI/bge-small-zh-v1.5`）
+- `OPENAI_EMBEDDING_MODEL`：OpenAI embedding 模型（默认 `text-embedding-3-small`）
+
+#### RAG 使用注意
+- 只有在消息里“附带来源”时才会强制 RAG，否则可能直接 `no hits`。
+- 当前默认只索引这些类型：`.md .txt .py .rst .json .yaml .yml`。
+- 如果用 DashScope 兼容接口，请优先设 `RAG_EMBEDDING_PROVIDER=dashscope`，并确保 `DASHSCOPE_API_KEY` 可用。
  
  ### 播客相关（可选）
  - `DEEPAGENTS_DATA_DIR`：数据目录（播客音频存放位置）
