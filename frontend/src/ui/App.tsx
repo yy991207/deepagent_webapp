@@ -3155,7 +3155,7 @@ function App() {
                   )}
                   <div className="ref-divider" />
                   <div className="ref-section-title">音频</div>
-                  {podcastRunDetail.result?.audio_file_path ? (
+                  {podcastRunDetail.result?.audio_ready ? (
                     <div style={{ marginTop: 8 }}>
                       <audio
                         controls
@@ -3174,7 +3174,7 @@ function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="ref-muted">暂无音频（可能仍在生成中）</div>
+                    <div className="ref-muted">暂无音频（可能仍在生成中或文件不可用）</div>
                   )}
                   <div className="ref-divider" />
                   <div className="ref-section-title">对话内容</div>

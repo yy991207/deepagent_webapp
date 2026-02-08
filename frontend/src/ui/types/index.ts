@@ -76,6 +76,7 @@ export type PodcastRunDetail = {
     speaker_profile: string;
     episode_name: string;
     audio_file_path: string | null;
+    audio_ready?: boolean;
     transcript: unknown;
     outline: unknown;
     created_at: string;

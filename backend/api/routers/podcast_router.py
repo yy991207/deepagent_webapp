@@ -258,6 +258,23 @@ def podcast_run_detail(run_id: str) -> dict[str, Any]:
         if detail is None:
             raise HTTPException(status_code=404, detail="not found")
         result = svc.get_result(run_id=run_id)
+        if isinstance(result, dict):
+            audio_file_path = str(result.get("audio_file_path") or "").strip()
+            audio_ready = False
+            if audio_file_path:
+                # 这里主动校验音频文件是否真实存在，避免前端直接请求 404
+                p = Path(audio_file_path)
+                if not p.is_absolute():
+                    p = BASE_DIR / p
+                data_dir = Path(os.environ.get("DEEPAGENTS_DATA_DIR") or (BASE_DIR / "data")).resolve()
+                podcasts_dir = (data_dir / "podcasts").resolve()
+                try:
+                    resolved = p.resolve()
+                except Exception:
+                    resolved = None
+                if resolved and (podcasts_dir in resolved.parents or resolved == podcasts_dir):
+                    audio_ready = resolved.exists() and resolved.is_file()
+            result = {**result, "audio_ready": audio_ready}
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
