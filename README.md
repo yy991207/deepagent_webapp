@@ -91,11 +91,8 @@
  ├── plans/                             # 设计文档和实现计划
  ├── doc/                               # 工作记录等文档
  ├── .env                               # 本地环境变量（启动时会被加载）
- ├── .runtime/                          # 运行时目录（自动生成）
- │   ├── pids/                          # 各服务 PID 文件
- │   └── logs/                          # 各服务日志文件
  ├── requirements.txt                   # Python 依赖
- ├── start_web_stack.sh                 # 一键启动/停止/看日志（支持单服务管理）
+ ├── start_web_stack.sh                 # Docker 服务管理脚本（基于 docker compose）
  └── uvicorn_log_config.yaml            # uvicorn 日志配置
  ```
  
@@ -271,57 +268,75 @@ OPENAI_TEMPERATURE=0.7
 - **依赖**：需安装 `langchain-mcp-adapters`（已在 requirements.txt 中声明）
 - **验证**：启动服务后发起聊天，观察后端日志是否出现 `MCP tools loaded | tools_count=...`
  
- ## 启动与停止
+## 启动与停止（仅 Docker）
 
- 统一使用根目录脚本：
- ```bash
- bash start_web_stack.sh start
- bash start_web_stack.sh status
- bash start_web_stack.sh logs
- bash start_web_stack.sh stop
- ```
+请统一使用 Docker 模式，不再混用本地 `uvicorn/vite/celery` 启动方式。
+
+### 推荐启动命令
+
+```bash
+# 1) 首次或依赖变化时（会重新 build）
+./start_web_stack.sh rebuild
+
+# 2) 查看服务状态
+./start_web_stack.sh status
+
+# 3) 查看日志（全部服务）
+./start_web_stack.sh logs
+```
+
+### 常用管理命令
+
+```bash
+# 启动全部服务（不重建镜像）
+./start_web_stack.sh start
+
+# 重建并启动（首次、依赖变化、Dockerfile 变化时使用）
+./start_web_stack.sh rebuild
+./start_web_stack.sh rebuild backend
+
+# 启动指定服务（不重建镜像）
+./start_web_stack.sh start backend
+./start_web_stack.sh start frontend
+./start_web_stack.sh start celery          # 等价 worker + beat
+./start_web_stack.sh start podcast-agent
+
+# 停止服务
+./start_web_stack.sh stop
+./start_web_stack.sh stop backend
+./start_web_stack.sh stop celery
+
+# 重启服务
+./start_web_stack.sh restart
+./start_web_stack.sh restart podcast-agent
+
+# 日志
+./start_web_stack.sh logs
+./start_web_stack.sh logs backend
+
+# 下线并移除容器/网络
+./start_web_stack.sh down
+```
 
 ### 服务架构
 
-系统包含以下服务组件：
+系统包含以下 Docker 服务组件：
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | 后端 (backend) | 7777 | FastAPI 主服务 |
-| 前端 (frontend) | 5173 | Vite + React 开发服务器 |
-| Celery Worker | - | 任务队列工作进程 |
-| Celery Beat | - | 定时任务调度器 |
-| Podcast Agent | 8888 | 播客生成执行服务 |
+| 前端 (frontend) | 8081 | Nginx 静态站点 + 反向代理 |
+| Celery Worker (worker) | - | 任务队列工作进程 |
+| Celery Beat (beat) | - | 定时任务调度器 |
+| Podcast Agent (podcast-agent) | 8888 | 播客生成执行服务 |
 
-### 服务管理命令
+### 直接使用 docker compose（可选）
 
 ```bash
-# 启动全部服务
-./start_web_stack.sh start
-
-# 启动单个服务
-./start_web_stack.sh start backend
-./start_web_stack.sh start frontend
-./start_web_stack.sh start celery          # Worker + Beat
-./start_web_stack.sh start celery-worker   # 仅 Worker
-./start_web_stack.sh start celery-beat     # 仅 Beat
-./start_web_stack.sh start podcast-agent   # 播客生成服务
-
-# 停止服务（同上，把 start 换成 stop）
-./start_web_stack.sh stop
-./start_web_stack.sh stop celery
-
-# 重启服务（同上，把 start 换成 restart）
-./start_web_stack.sh restart podcast-agent
-
-# 查看服务状态
-./start_web_stack.sh status
-
-# 查看日志（交互式菜单）
-./start_web_stack.sh logs
-
-# 查看全部日志（合并）
-./start_web_stack.sh logs-all
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
+docker compose down
 ```
 
 ### 播客生成架构（投递 + Callback 模式）
@@ -363,15 +378,13 @@ PODCAST_AGENT_PORT=8888          # 服务端口（默认 8888）
 
  默认端口：
  - 后端：`http://127.0.0.1:7777`
- - 前端：`http://127.0.0.1:5173`
+ - 前端：`http://127.0.0.1:8081`
  - Podcast Agent：`http://127.0.0.1:8888`
 
- 日志位置：
- - `.runtime/logs/backend.log`
- - `.runtime/logs/frontend.log`
- - `.runtime/logs/celery_worker.log`
- - `.runtime/logs/celery_beat.log`
- - `.runtime/logs/podcast_agent.log`
+ 日志查看：
+ - `./start_web_stack.sh logs`
+ - `./start_web_stack.sh logs backend`
+ - `docker compose logs -f worker`
  
  ## 接口大概有哪些（给你快速对照）
 

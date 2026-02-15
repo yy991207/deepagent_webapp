@@ -19,7 +19,6 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY backend ./backend
 COPY skills ./skills
-COPY qwen_tts ./qwen_tts
 COPY uvicorn_log_config.yaml ./uvicorn_log_config.yaml
 
 EXPOSE 7777

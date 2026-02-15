@@ -32,10 +32,10 @@ services:
       DEEPAGENTS_DATA_DIR: /data
       RAG_EMBEDDING_PROVIDER: dashscope
       RAG_DASHSCOPE_EMBEDDING_MODEL: ${RAG_DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v2}
-      OPENSANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_READY_TIMEOUT_SECONDS: "180"
-      SANDBOX_SKIP_HEALTH_CHECK: "1"
+      OPENSANDBOX_DOMAIN: ${OPENSANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_READY_TIMEOUT_SECONDS: ${SANDBOX_READY_TIMEOUT_SECONDS:-180}
+      SANDBOX_SKIP_HEALTH_CHECK: ${SANDBOX_SKIP_HEALTH_CHECK:-1}
     depends_on:
       - mongo
       - redis
@@ -60,10 +60,10 @@ services:
       DEEPAGENTS_DATA_DIR: /data
       PODCAST_AGENT_HOST: ${PODCAST_AGENT_HOST:-0.0.0.0}
       PODCAST_AGENT_PORT: ${PODCAST_AGENT_PORT:-8888}
-      OPENSANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_READY_TIMEOUT_SECONDS: "180"
-      SANDBOX_SKIP_HEALTH_CHECK: "1"
+      OPENSANDBOX_DOMAIN: ${OPENSANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_READY_TIMEOUT_SECONDS: ${SANDBOX_READY_TIMEOUT_SECONDS:-180}
+      SANDBOX_SKIP_HEALTH_CHECK: ${SANDBOX_SKIP_HEALTH_CHECK:-1}
     depends_on:
       - mongo
       - redis
@@ -89,10 +89,10 @@ services:
       DEEPAGENTS_DATA_DIR: /data
       PODCAST_AGENT_URL: http://podcast-agent:8888
       CALLBACK_BASE_URL: http://backend:7777
-      OPENSANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_READY_TIMEOUT_SECONDS: "180"
-      SANDBOX_SKIP_HEALTH_CHECK: "1"
+      OPENSANDBOX_DOMAIN: ${OPENSANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_READY_TIMEOUT_SECONDS: ${SANDBOX_READY_TIMEOUT_SECONDS:-180}
+      SANDBOX_SKIP_HEALTH_CHECK: ${SANDBOX_SKIP_HEALTH_CHECK:-1}
     depends_on:
       - mongo
       - redis
@@ -116,10 +116,10 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       DEEPAGENTS_DATA_DIR: /data
-      OPENSANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_DOMAIN: host.docker.internal:8080
-      SANDBOX_READY_TIMEOUT_SECONDS: "180"
-      SANDBOX_SKIP_HEALTH_CHECK: "1"
+      OPENSANDBOX_DOMAIN: ${OPENSANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-host.docker.internal:8080}
+      SANDBOX_READY_TIMEOUT_SECONDS: ${SANDBOX_READY_TIMEOUT_SECONDS:-180}
+      SANDBOX_SKIP_HEALTH_CHECK: ${SANDBOX_SKIP_HEALTH_CHECK:-1}
     depends_on:
       - mongo
       - redis
