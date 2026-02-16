@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import hashlib
@@ -149,6 +150,23 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         # 文件锁路径，保护索引构建过程
         self._lock_path = self._persist_dir / ".lock"
 
+    def _parse_filesystem_write_ref(self, raw: str) -> tuple[str, str] | None:
+        """解析 filesystem_writes 引用标识。
+
+        约定格式：fsw:{session_id}:{write_id}
+        """
+        text = str(raw or "").strip()
+        if not text.startswith("fsw:"):
+            return None
+        parts = text.split(":", 2)
+        if len(parts) != 3:
+            return None
+        session_id = parts[1].strip()
+        write_id = parts[2].strip()
+        if not session_id or not write_id:
+            return None
+        return session_id, write_id
+
     def _resolve_selected_files(self) -> list[Path] | None:
         """解析指定的源文件列表，返回有效的本地文件路径。
         
@@ -167,6 +185,9 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         for raw in self._source_files:
             # 跳过 MongoDB ObjectId（24位十六进制字符串）
             if isinstance(raw, str) and len(raw) == 24:
+                continue
+            # 跳过 filesystem_writes 引用，避免被当成本地路径解析
+            if isinstance(raw, str) and self._parse_filesystem_write_ref(raw):
                 continue
             try:
                 # 解析路径，支持用户目录展开
@@ -204,15 +225,26 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
         """
         if not self._source_files:
             return None
-        # 筛选出 MongoDB ObjectId（24位十六进制字符串）
-        ids = [x for x in self._source_files if isinstance(x, str) and len(x) == 24]
-        if not ids:
+        # 筛选出 MongoDB ObjectId（24位十六进制字符串）与 filesystem_writes 引用
+        mongo_ids: list[str] = []
+        fs_write_refs: list[tuple[str, str]] = []
+        for raw in self._source_files:
+            if not isinstance(raw, str):
+                continue
+            if len(raw) == 24:
+                mongo_ids.append(raw)
+                continue
+            fs_ref = self._parse_filesystem_write_ref(raw)
+            if fs_ref:
+                fs_write_refs.append(fs_ref)
+
+        if not mongo_ids and not fs_write_refs:
             return None
 
         mongo = get_mongo_manager()
         docs: list[dict[str, Any]] = []
         # 限制最大文档数量，防止内存溢出
-        for doc_id in ids[: self._max_files]:
+        for doc_id in mongo_ids[: self._max_files]:
             # 获取文档的元数据和二进制内容
             item = mongo.get_document_bytes(doc_id=doc_id)
             if not item:
@@ -223,6 +255,60 @@ class LlamaIndexRagMiddleware(AgentMiddleware):
             if filename and Path(filename).suffix.lower() not in self._include_exts:
                 continue
             docs.append({"id": doc_id, "meta": meta, "bytes": raw})
+
+        # 关键逻辑：支持把 agent 生成的 filesystem_writes 文档作为 RAG 来源参与检索。
+        # 这样前端勾选“生成文档”后，可以直接进入同一套检索链路。
+        for session_id, write_id in fs_write_refs:
+            if len(docs) >= self._max_files:
+                break
+            try:
+                write = mongo.get_filesystem_write(write_id=write_id, session_id=session_id)
+            except Exception:
+                continue
+            if not isinstance(write, dict):
+                continue
+
+            write_meta = write.get("metadata") if isinstance(write.get("metadata"), dict) else {}
+            file_path = str(write.get("file_path") or "")
+            filename = Path(file_path).name if file_path else f"{write_id}.txt"
+            file_type = str(write_meta.get("type") or "").strip().lower()
+            suffix = Path(filename).suffix.lower()
+            if not suffix and file_type:
+                filename = f"{filename}.{file_type}"
+                suffix = f".{file_type}"
+            if suffix and suffix not in self._include_exts:
+                continue
+
+            content_bytes = b""
+            binary_content = write.get("binary_content")
+            if isinstance(binary_content, str) and binary_content:
+                try:
+                    content_bytes = base64.b64decode(binary_content)
+                except Exception:
+                    content_bytes = b""
+            if not content_bytes:
+                content = write.get("content")
+                if isinstance(content, bytes):
+                    content_bytes = bytes(content)
+                else:
+                    content_bytes = str(content or "").encode("utf-8")
+            if not content_bytes:
+                continue
+
+            ref_id = f"fsw:{session_id}:{write_id}"
+            docs.append(
+                {
+                    "id": ref_id,
+                    "meta": {
+                        "id": ref_id,
+                        "sha256": str(write_meta.get("sha256") or hashlib.sha256(content_bytes).hexdigest()),
+                        "filename": filename,
+                        "rel_path": file_path or filename,
+                        "size": int(write_meta.get("size") or len(content_bytes)),
+                    },
+                    "bytes": content_bytes,
+                }
+            )
         return docs
 
     def _iter_source_files(self) -> list[Path]:

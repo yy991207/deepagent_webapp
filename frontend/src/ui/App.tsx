@@ -240,6 +240,30 @@ const upsertToolMessage = (
   return [...prev, merged];
 };
 
+type GeneratedSourceItem = FilesystemWrite & {
+  source_ref: string;
+};
+
+const buildFilesystemWriteSourceRef = (sessionId: string, writeId: string): string =>
+  `fsw:${sessionId}:${writeId}`;
+
+const parseFilesystemWriteSourceRef = (ref: string): { session_id: string; write_id: string } | null => {
+  const text = String(ref || "").trim();
+  if (!text.startsWith("fsw:")) {
+    return null;
+  }
+  const parts = text.split(":", 3);
+  if (parts.length !== 3) {
+    return null;
+  }
+  const session_id = String(parts[1] || "").trim();
+  const write_id = String(parts[2] || "").trim();
+  if (!session_id || !write_id) {
+    return null;
+  }
+  return { session_id, write_id };
+};
+
 // --- Icons ---
 const Icons = {
   Logo: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>, // Simplified logo
@@ -626,6 +650,62 @@ function App() {
     status === "requirement_processing" ||
     status === "draft_processing" ||
     status === "round_processing";
+  const isCreativeHumanStageStatus = (status?: string | null) =>
+    status === "pre_agent_pending_confirm" ||
+    status === "requirement_pending_confirm" ||
+    status === "draft_pending_confirm" ||
+    status === "bc_review_done";
+  const isCreativeCancellableStatus = (status?: string | null) =>
+    !!status && status !== "completed" && status !== "cancelled" && status !== "error";
+
+  const formatCreativeRunMessage = (run: CreativeRun | null) => {
+    if (!run) return "";
+    if (run.status === "pre_agent_pending_confirm") {
+      const plan = run.prompt_plan;
+      return (
+        `[创作模式][run_id=${run.run_id}] Pre-Agent 方案\n\n` +
+        `目标内容：${plan.content_goal}\n\n` +
+        `Agent A 角色：${plan.agent_a_prompt}\n\n` +
+        `Agent B 角色：${plan.agent_b_prompt}\n\n` +
+        `Agent C 角色：${plan.agent_c_prompt}\n\n` +
+        `输出要求：${plan.output_requirements}\n\n` +
+        "请在下方 Human in the loop 交互区选择：确认方案，或填写反馈后重新生成。"
+      );
+    }
+    if (run.status === "requirement_pending_confirm") {
+      return (
+        "[创作模式] Agent A 需求理解\n\n" +
+        `${run.clarified_requirement || "暂无内容"}\n\n` +
+        "请在下方 Human in the loop 交互区选择：确认需求理解，或填写反馈后重新生成。"
+      );
+    }
+    if (run.status === "draft_pending_confirm") {
+      return (
+        `[创作模式] Agent A 文档草稿（第 ${run.round_index || 1} 轮）\n\n` +
+        `${run.demo_doc || "暂无草稿"}\n\n` +
+        "请在下方 Human in the loop 交互区选择：草稿进入 B/C 审查，或按反馈继续修稿。"
+      );
+    }
+    if (run.status === "bc_review_done") {
+      const issues = Array.isArray(run.issues) ? run.issues : [];
+      const issueText = issues.length ? issues.map((x, i) => `${i + 1}. ${x}`).join("\n") : "无";
+      return (
+        "[创作模式] B/C 审查结果\n\n" +
+        `Agent B 问题列表：\n${issueText}\n\n` +
+        `Agent C 判定：${run.c_judgement || "unreasonable"}\n` +
+        `判定理由：${run.c_reason || "未给出理由"}\n\n` +
+        "请在下方 Human in the loop 交互区选择：直接定稿，或进入下一轮 ABC。"
+      );
+    }
+    if (run.status === "completed") {
+      return (
+        "[创作模式] 终稿已完成\n\n" +
+        `${run.final_doc || "终稿为空"}\n\n` +
+        "终稿已生成，可在文档卡片中查看和下载。"
+      );
+    }
+    return "";
+  };
   const [podcastSelectedSourceIds, setPodcastSelectedSourceIds] = useState<Set<string>>(new Set());
   const [podcastSources, setPodcastSources] = useState<UploadedSource[]>([]);
   const [podcastSourcesLoading, setPodcastSourcesLoading] = useState(false);
@@ -691,6 +771,8 @@ function App() {
 
   const selectedList = useMemo(() => Array.from(selectedFiles), [selectedFiles]);
   const isStreaming = status === "思考中...";
+  const canCancelCreativeTask = !!creativeRun && isCreativeCancellableStatus(creativeRun.status);
+  const showUnifiedStopButton = isStreaming || canCancelCreativeTask;
 
   const resetStreamState = () => {
     assistantBufferRef.current = { id: "", text: "" };
@@ -796,12 +878,27 @@ function App() {
     }
   };
 
-  const selectedAttachmentNames = useMemo(() => {
-    const map = new Map(sources.map((s) => [s.id, s.filename] as const));
-    return selectedList.map((id) => map.get(id) || id);
-  }, [selectedList, sources]);
+  const generatedSources = useMemo<GeneratedSourceItem[]>(
+    () =>
+      (filesystemWrites || []).map((w) => ({
+        ...w,
+        source_ref: buildFilesystemWriteSourceRef(w.session_id || sessionId, w.write_id),
+      })),
+    [filesystemWrites, sessionId],
+  );
 
-  const allFilePaths = useMemo(() => sources.map((s) => s.id), [sources]);
+  const selectedAttachmentNames = useMemo(() => {
+    const map = new Map<string, string>(sources.map((s) => [s.id, s.filename]));
+    for (const w of generatedSources) {
+      map.set(w.source_ref, `[生成文档] ${w.title || w.file_path || w.write_id}`);
+    }
+    return selectedList.map((id) => map.get(id) || id);
+  }, [selectedList, sources, generatedSources]);
+
+  const allFilePaths = useMemo(
+    () => [...sources.map((s) => s.id), ...generatedSources.map((w) => w.source_ref)],
+    [sources, generatedSources],
+  );
 
   // 发送单条消息的反馈信息：index 含义为 [copy, like, dislike]
   const sendMessageFeedback = async (messageId: string, index: number) => {
@@ -1049,6 +1146,7 @@ function App() {
     await cancelActiveStream(sessionId);
     currentSessionIdRef.current = next;
     setSessionId(next);
+    setSelectedFiles(new Set());
     setStatus("就绪");
     try {
       localStorage.setItem("deepagents_session_id", next);
@@ -1690,6 +1788,29 @@ function App() {
     void fetchPodcastSources("");
   }, [podcastConfigOpen]);
 
+  const openFilesystemWriteDetail = async (write: FilesystemWrite, sessionOverride?: string) => {
+    const targetSessionId = String(sessionOverride || write.session_id || sessionId || "").trim();
+    if (!targetSessionId || !write.write_id) {
+      return;
+    }
+    const resp = await fetch(
+      `/api/filesystem/write/${encodeURIComponent(write.write_id)}?session_id=${encodeURIComponent(targetSessionId)}`,
+    );
+    if (!resp.ok) {
+      return;
+    }
+    const data = await resp.json();
+    setWriteDetail({
+      write_id: write.write_id,
+      content: data.content || "",
+      binary_content: data.binary_content || "",
+      title: write.title,
+      file_type: data.metadata?.type || "",
+      file_path: data.file_path || "",
+    });
+    setWriteDetailOpen(true);
+  };
+
   const openSourceDetail = async (src: UploadedSource) => {
     setSourceDetailOpen(true);
     setSourceDetailLoading(true);
@@ -2114,13 +2235,17 @@ function App() {
     );
   };
 
-  const finishCreativeStreamMessage = () => {
+  const finishCreativeStreamMessage = (finalContent?: string) => {
     const messageId = creativeStreamMessageIdRef.current;
     if (!messageId) return;
     setMessages((prev: ChatMessage[]) =>
       prev.map((m) => {
         if (m.role !== "assistant" || m.id !== messageId) return m;
-        return { ...m, isPending: false };
+        return {
+          ...m,
+          content: typeof finalContent === "string" && finalContent.trim() ? finalContent : m.content,
+          isPending: false,
+        };
       }),
     );
     creativeStreamMessageIdRef.current = null;
@@ -2191,8 +2316,7 @@ function App() {
           return;
         }
         if (eventType === "chunk") {
-          const text = String(event?.text || "");
-          appendCreativeStreamChunkToDialog(text);
+          // start 阶段流式内容通常是 Pre-Agent 结构化 JSON，不直接在对话区展示原始片段，避免排版抖动。
           setCreativeNotice({ type: "info", message: "正在流式生成 Pre-Agent 方案..." });
           return;
         }
@@ -2200,7 +2324,7 @@ function App() {
           const run = (event?.run as CreativeRun | undefined) || null;
           latestRun = run;
           setCreativeRun(run);
-          finishCreativeStreamMessage();
+          finishCreativeStreamMessage(formatCreativeRunMessage(run));
           setCreativeNotice(null);
           return;
         }
@@ -2240,6 +2364,12 @@ function App() {
     setCreativeNotice({ type: "info", message: "正在建立 SSE 流并提交你的操作..." });
     setStatus("处理中...");
     try {
+      const normalizedAction = String(payload.action || "").toLowerCase();
+      const shouldPreviewChunkInDialog =
+        !(
+          (path.includes("/pre-agent/") && normalizedAction === "regenerate") ||
+          (path.includes("/draft/decision") && normalizedAction === "confirm")
+        );
       const resp = await fetch(`${path}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2268,7 +2398,9 @@ function App() {
         }
         if (eventType === "chunk") {
           const text = String(event?.text || "");
-          appendCreativeStreamChunkToDialog(text);
+          if (shouldPreviewChunkInDialog) {
+            appendCreativeStreamChunkToDialog(text);
+          }
           setCreativeNotice({ type: "info", message: "任务处理中，内容正在流式输出..." });
           return;
         }
@@ -2276,7 +2408,8 @@ function App() {
           const run = (event?.run as CreativeRun | undefined) || null;
           latestRun = run;
           setCreativeRun(run);
-          finishCreativeStreamMessage();
+          const formatted = formatCreativeRunMessage(run);
+          finishCreativeStreamMessage(formatted || undefined);
           setCreativeNotice(null);
           return;
         }
@@ -2467,10 +2600,21 @@ function App() {
     setRefModalFileLoading(true);
     try {
       if (mongoId) {
-        const resp = await fetch(`/api/sources/detail?id=${encodeURIComponent(mongoId)}&max_bytes=200000`);
-        if (resp.ok) {
-          const data = (await resp.json()) as { content_preview?: string | null };
-          setRefModalFileContent(data.content_preview || "");
+        const fsWriteRef = parseFilesystemWriteSourceRef(mongoId);
+        if (fsWriteRef) {
+          const resp = await fetch(
+            `/api/filesystem/write/${encodeURIComponent(fsWriteRef.write_id)}?session_id=${encodeURIComponent(fsWriteRef.session_id)}`,
+          );
+          if (resp.ok) {
+            const data = (await resp.json()) as { content?: string };
+            setRefModalFileContent(data.content || "");
+          }
+        } else {
+          const resp = await fetch(`/api/sources/detail?id=${encodeURIComponent(mongoId)}&max_bytes=200000`);
+          if (resp.ok) {
+            const data = (await resp.json()) as { content_preview?: string | null };
+            setRefModalFileContent(data.content_preview || "");
+          }
         }
       } else if (source) {
         const resp = await fetch(`/api/fs/read?path=${encodeURIComponent(source)}&limit=400`);
@@ -2788,6 +2932,38 @@ function App() {
                     }
                   }}
                 />
+                {!!generatedSources.length && (
+                  <div className="generated-source-section">
+                    <div className="generated-source-title">本会话生成文档（可勾选参与 RAG）</div>
+                    <div className="generated-source-items">
+                      {generatedSources.map((w) => {
+                        const checked = selectedFiles.has(w.source_ref);
+                        return (
+                          <div key={w.source_ref} className={`generated-source-row ${checked ? "selected" : ""}`}>
+                            <button
+                              type="button"
+                              className="generated-source-main"
+                              onClick={async () => {
+                                await openFilesystemWriteDetail(w, w.session_id);
+                              }}
+                            >
+                              <span className="generated-source-name">{w.title || w.file_path || w.write_id}</span>
+                              <span className="generated-source-meta">
+                                {w.type || "txt"} · {(Math.max(Number(w.size) || 0, 0) / 1024).toFixed(1)}KB
+                              </span>
+                            </button>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelected(w.source_ref)}
+                              aria-label={`选择来源 ${w.title || w.write_id}`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               </>
               )}
@@ -2920,21 +3096,7 @@ function App() {
                                 <div
                                   style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
                                   onClick={async () => {
-                                    const resp = await fetch(
-                                      `/api/filesystem/write/${encodeURIComponent(w.write_id)}?session_id=${encodeURIComponent(sessionId)}`,
-                                    );
-                                    if (resp.ok) {
-                                      const data = await resp.json();
-                                      setWriteDetail({
-                                        write_id: w.write_id,
-                                        content: data.content || "",
-                                        binary_content: data.binary_content || "",
-                                        title: w.title,
-                                        file_type: data.metadata?.type || "",
-                                        file_path: data.file_path || "",
-                                      });
-                                      setWriteDetailOpen(true);
-                                    }
+                                    await openFilesystemWriteDetail(w);
                                   }}
                                 >
                                   <div
@@ -3121,6 +3283,136 @@ function App() {
                 </div>
               );
             })()}
+            {creativeRun && isCreativeHumanStageStatus(creativeRun.status) ? (
+              <div className="message-row assistant">
+                <div className="assistant-row">
+                  <div className="assistant-avatar-col">
+                    <div className="assistant-avatar">
+                      <Icons.NotebookLogo />
+                    </div>
+                  </div>
+                  <div className="message-container assistant">
+                    <div className="message-bubble assistant">
+                      <div className="message-content" style={{ width: "100%" }}>
+                        <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 8 }}>
+                          Human in the loop 交互区
+                          {` ｜ run_id: ${creativeRun.run_id}`}
+                        </div>
+                        {creativeNotice ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              marginBottom: 8,
+                              color: creativeNotice.type === "error" ? "#dc2626" : "#2563eb",
+                            }}
+                          >
+                            {creativeNotice.message}
+                          </div>
+                        ) : null}
+                        <textarea
+                          rows={2}
+                          placeholder="需要重生成时，在这里补充你的反馈（重新生成时必填）"
+                          value={creativeFeedback}
+                          onChange={(e) => setCreativeFeedback(e.target.value)}
+                          style={{
+                            width: "100%",
+                            resize: "vertical",
+                            border: "1px solid #d1d5db",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            fontSize: 13,
+                            background: "#fff",
+                            minHeight: 52,
+                          }}
+                        />
+                        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                          {creativeRun.status === "pre_agent_pending_confirm" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="add-source-action primary"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativePreAgent("confirm")}
+                              >
+                                确认方案
+                              </button>
+                              <button
+                                type="button"
+                                className="add-source-action"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativePreAgent("regenerate")}
+                              >
+                                重新生成方案
+                              </button>
+                            </>
+                          ) : null}
+                          {creativeRun.status === "requirement_pending_confirm" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="add-source-action primary"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeRequirement("confirm")}
+                              >
+                                确认需求理解
+                              </button>
+                              <button
+                                type="button"
+                                className="add-source-action"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeRequirement("revise")}
+                              >
+                                重新生成需求理解
+                              </button>
+                            </>
+                          ) : null}
+                          {creativeRun.status === "draft_pending_confirm" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="add-source-action primary"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeDraft("confirm")}
+                              >
+                                草稿进入 B/C 审查
+                              </button>
+                              <button
+                                type="button"
+                                className="add-source-action"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeDraft("revise")}
+                              >
+                                按反馈继续修稿
+                              </button>
+                            </>
+                          ) : null}
+                          {creativeRun.status === "bc_review_done" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="add-source-action primary"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeRound("finalize")}
+                              >
+                                直接定稿
+                              </button>
+                              <button
+                                type="button"
+                                className="add-source-action"
+                                disabled={creativeBusy}
+                                onClick={() => void submitCreativeRound("next_round")}
+                              >
+                                进入下一轮 ABC
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div ref={messagesEndRef} />
           </div>
 
@@ -3179,13 +3471,18 @@ function App() {
                   <button type="button" className="input-action-btn" title="语音">
                     <Icons.Mic />
                   </button>
-                  {isStreaming ? (
+                  {showUnifiedStopButton ? (
                     <button
                       className="send-btn"
-                      title="停止生成"
+                      title={isStreaming ? "停止生成" : "取消当前创作任务"}
                       onClick={() => {
-                        void cancelActiveStream(sessionId);
-                        setStatus("就绪");
+                        if (isStreaming) {
+                          void cancelActiveStream(sessionId);
+                          setStatus("就绪");
+                        }
+                        if (canCancelCreativeTask) {
+                          void cancelCreativeRun();
+                        }
                       }}
                     >
                       <Icons.Stop />
@@ -3197,149 +3494,9 @@ function App() {
                 </div>
               </div>
             </div>
-            {(creativeModeEnabled || !!creativeRun) ? (
-              <div
-                style={{
-                  marginTop: 10,
-                  border: "1px solid #d9dee5",
-                  borderRadius: 10,
-                  padding: 10,
-                  background: "#f7f9fc",
-                }}
-              >
-                <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 8 }}>
-                  当前模式：创作模式（Pre-Agent + A/B/C + Human in the loop）
-                  {creativeRun ? ` ｜ run_id: ${creativeRun.run_id}` : " ｜ 尚未开始"}
-                </div>
-                {creativeRun && creativeRun.status !== "completed" ? (
-                  <>
-                    {creativeNotice ? (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          marginBottom: 8,
-                          color: creativeNotice.type === "error" ? "#dc2626" : "#2563eb",
-                        }}
-                      >
-                        {creativeNotice.message}
-                      </div>
-                    ) : null}
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                      <button
-                        type="button"
-                        className="add-source-action"
-                        disabled={creativeBusy}
-                        onClick={() => void cancelCreativeRun()}
-                      >
-                        取消当前创作任务
-                      </button>
-                    </div>
-                    <textarea
-                      rows={2}
-                      placeholder="需要重生成时，在这里补充你的反馈（重新生成时必填）"
-                      value={creativeFeedback}
-                      onChange={(e) => setCreativeFeedback(e.target.value)}
-                      style={{
-                        width: "100%",
-                        resize: "vertical",
-                        border: "1px solid #d1d5db",
-                        borderRadius: 8,
-                        padding: "8px 10px",
-                        fontSize: 13,
-                        background: "#fff",
-                        minHeight: 52,
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                      {creativeRun.status === "pre_agent_pending_confirm" ? (
-                        <>
-                          <button
-                            type="button"
-                            className="add-source-action primary"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativePreAgent("confirm")}
-                          >
-                            确认方案
-                          </button>
-                          <button
-                            type="button"
-                            className="add-source-action"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativePreAgent("regenerate")}
-                          >
-                            重新生成方案
-                          </button>
-                        </>
-                      ) : null}
-                      {creativeRun.status === "requirement_pending_confirm" ? (
-                        <>
-                          <button
-                            type="button"
-                            className="add-source-action primary"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeRequirement("confirm")}
-                          >
-                            确认需求理解
-                          </button>
-                          <button
-                            type="button"
-                            className="add-source-action"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeRequirement("revise")}
-                          >
-                            重新生成需求理解
-                          </button>
-                        </>
-                      ) : null}
-                      {creativeRun.status === "draft_pending_confirm" ? (
-                        <>
-                          <button
-                            type="button"
-                            className="add-source-action primary"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeDraft("confirm")}
-                          >
-                            草稿进入 B/C 审查
-                          </button>
-                          <button
-                            type="button"
-                            className="add-source-action"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeDraft("revise")}
-                          >
-                            按反馈继续修稿
-                          </button>
-                        </>
-                      ) : null}
-                      {creativeRun.status === "bc_review_done" ? (
-                        <>
-                          <button
-                            type="button"
-                            className="add-source-action primary"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeRound("finalize")}
-                          >
-                            直接定稿
-                          </button>
-                          <button
-                            type="button"
-                            className="add-source-action"
-                            disabled={creativeBusy}
-                            onClick={() => void submitCreativeRound("next_round")}
-                          >
-                            进入下一轮 ABC
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    {creativeRun?.status === "completed"
-                      ? "当前创作任务已完成。你可以继续输入新需求发起下一次创作。"
-                      : "输入需求并发送后，会自动进入 Pre-Agent 方案确认阶段。"}
-                  </div>
-                )}
+            {creativeModeEnabled && !creativeRun ? (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+                创作模式已开启。发送需求后将进入多智能体创作流程。
               </div>
             ) : null}
             <div className="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>

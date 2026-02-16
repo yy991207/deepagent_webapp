@@ -72,19 +72,50 @@ class ChatStreamService:
         self._sandbox_root = Path("/workspace")
         logger.info("OpenSandbox mode enabled")
 
+    def _parse_filesystem_write_ref(self, raw: str) -> tuple[str, str] | None:
+        """解析 filesystem_writes 来源引用。"""
+        text = str(raw or "").strip()
+        if not text.startswith("fsw:"):
+            return None
+        parts = text.split(":", 2)
+        if len(parts) != 3:
+            return None
+        session_id = parts[1].strip()
+        write_id = parts[2].strip()
+        if not session_id or not write_id:
+            return None
+        return session_id, write_id
+
     def _build_attachments_meta(self, *, mongo, file_refs: list[str]) -> list[dict[str, Any]]:
         """构建附件元数据列表。"""
         attachments_meta: list[dict[str, Any]] = []
         for ref in file_refs:
-            mongo_id = str(ref)
-            filename = mongo_id
-            try:
-                detail = mongo.get_document_detail(doc_id=mongo_id)
-                if isinstance(detail, dict) and detail.get("filename"):
-                    filename = str(detail.get("filename"))
-            except Exception:
-                filename = mongo_id
-            attachments_meta.append({"mongo_id": mongo_id, "filename": filename})
+            source_ref = str(ref)
+            filename = source_ref
+            fs_ref = self._parse_filesystem_write_ref(source_ref)
+            if fs_ref:
+                # 关键逻辑：当来源是 filesystem_writes 时，优先显示文档标题，避免前端只看到长 ID。
+                session_id, write_id = fs_ref
+                try:
+                    write = mongo.get_filesystem_write(write_id=write_id, session_id=session_id)
+                    if isinstance(write, dict):
+                        metadata = write.get("metadata") if isinstance(write.get("metadata"), dict) else {}
+                        file_path = str(write.get("file_path") or "")
+                        filename = str(
+                            metadata.get("title")
+                            or (Path(file_path).name if file_path else "")
+                            or write_id
+                        )
+                except Exception:
+                    filename = source_ref
+            else:
+                try:
+                    detail = mongo.get_document_detail(doc_id=source_ref)
+                    if isinstance(detail, dict) and detail.get("filename"):
+                        filename = str(detail.get("filename"))
+                except Exception:
+                    filename = source_ref
+            attachments_meta.append({"mongo_id": source_ref, "filename": filename})
         return attachments_meta
 
     def _build_system_prompt(

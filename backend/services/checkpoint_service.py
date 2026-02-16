@@ -33,6 +33,14 @@ class CheckpointService:
     def keep_last(self) -> int:
         return self._keep_last
 
+    async def _table_exists(self, db: aiosqlite.Connection, table_name: str) -> bool:
+        cursor = await db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (table_name,),
+        )
+        row = await cursor.fetchone()
+        return bool(row)
+
     async def cleanup_keep_last(self, *, session_id: str) -> CheckpointCleanupResult:
         """只保留最近 N 条 checkpoint。
 
@@ -49,6 +57,12 @@ class CheckpointService:
         deleted_writes = 0
 
         async with aiosqlite.connect(str(db_path)) as db:
+            # 关键逻辑：有些环境会存在“数据库文件已创建，但 checkpoint 表尚未初始化”的情况。
+            # 这里直接返回 0，避免删除会话时抛 no such table。
+            has_checkpoints = await self._table_exists(db, "checkpoints")
+            if not has_checkpoints:
+                return CheckpointCleanupResult(deleted_checkpoints=0, deleted_writes=0)
+
             # 找到需要删除的旧 checkpoint_id 列表
             cursor = await db.execute(
                 """
@@ -69,11 +83,13 @@ class CheckpointService:
             placeholders = ",".join(["?"] * len(old_ids))
 
             # 先删 writes，再删 checkpoints，避免残留
-            cur_w = await db.execute(
-                f"DELETE FROM writes WHERE thread_id = ? AND checkpoint_id IN ({placeholders})",
-                (session_id, *old_ids),
-            )
-            deleted_writes = int(cur_w.rowcount or 0)
+            has_writes = await self._table_exists(db, "writes")
+            if has_writes:
+                cur_w = await db.execute(
+                    f"DELETE FROM writes WHERE thread_id = ? AND checkpoint_id IN ({placeholders})",
+                    (session_id, *old_ids),
+                )
+                deleted_writes = int(cur_w.rowcount or 0)
 
             cur_c = await db.execute(
                 f"DELETE FROM checkpoints WHERE thread_id = ? AND checkpoint_id IN ({placeholders})",
@@ -93,11 +109,23 @@ class CheckpointService:
 
         db_path = get_db_path()
         async with aiosqlite.connect(str(db_path)) as db:
-            cur_w = await db.execute("DELETE FROM writes WHERE thread_id = ?", (session_id,))
-            cur_c = await db.execute("DELETE FROM checkpoints WHERE thread_id = ?", (session_id,))
+            # 关键逻辑：兼容尚未初始化 checkpoint 表的数据库文件。
+            # 例如新环境首次删除会话时，db 可能存在但表不存在。
+            has_writes = await self._table_exists(db, "writes")
+            has_checkpoints = await self._table_exists(db, "checkpoints")
+
+            deleted_writes = 0
+            deleted_checkpoints = 0
+
+            if has_writes:
+                cur_w = await db.execute("DELETE FROM writes WHERE thread_id = ?", (session_id,))
+                deleted_writes = int(cur_w.rowcount or 0)
+            if has_checkpoints:
+                cur_c = await db.execute("DELETE FROM checkpoints WHERE thread_id = ?", (session_id,))
+                deleted_checkpoints = int(cur_c.rowcount or 0)
             await db.commit()
 
         return CheckpointCleanupResult(
-            deleted_checkpoints=int(cur_c.rowcount or 0),
-            deleted_writes=int(cur_w.rowcount or 0),
+            deleted_checkpoints=deleted_checkpoints,
+            deleted_writes=deleted_writes,
         )
