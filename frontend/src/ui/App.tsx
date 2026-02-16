@@ -664,6 +664,7 @@ function App() {
   // 当工具执行完毕但对应的 assistant 文本消息还没开始时，由于此时没有 messageId，
   // 只能暂存到这里，等待下一个 chat.delta 触发的新消息认领
   const pendingWritesForNextRef = useRef<FilesystemWrite[]>([]);
+  const creativeStreamMessageIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSessionIdRef = useRef<string>("");
   const isAutoScrollEnabledRef = useRef(true);
@@ -2075,23 +2076,89 @@ function App() {
     }
   };
 
-  const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
-    // 避免长耗时请求让按钮长期无反馈：到期主动中断并交给上层统一提示。
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { ...init, signal: controller.signal });
-    } finally {
-      window.clearTimeout(timer);
+  const beginCreativeStreamMessage = (runId: string) => {
+    const normalizedRunId = String(runId || "").trim();
+    if (!normalizedRunId) return;
+    const messageId = `creative-stream-${normalizedRunId}`;
+    creativeStreamMessageIdRef.current = messageId;
+    const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setMessages((prev: ChatMessage[]) => {
+      if (prev.some((m) => m.role === "assistant" && m.id === messageId)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id: messageId,
+          role: "assistant",
+          content: "",
+          timestamp,
+          isPending: true,
+          attachments: [],
+          references: [],
+          suggestedQuestions: [],
+        },
+      ];
+    });
+  };
+
+  const appendCreativeStreamChunkToDialog = (text: string) => {
+    const chunk = String(text || "");
+    const messageId = creativeStreamMessageIdRef.current;
+    if (!chunk || !messageId) return;
+    setMessages((prev: ChatMessage[]) =>
+      prev.map((m) => {
+        if (m.role !== "assistant" || m.id !== messageId) return m;
+        return { ...m, content: `${m.content || ""}${chunk}`, isPending: true };
+      }),
+    );
+  };
+
+  const finishCreativeStreamMessage = () => {
+    const messageId = creativeStreamMessageIdRef.current;
+    if (!messageId) return;
+    setMessages((prev: ChatMessage[]) =>
+      prev.map((m) => {
+        if (m.role !== "assistant" || m.id !== messageId) return m;
+        return { ...m, isPending: false };
+      }),
+    );
+    creativeStreamMessageIdRef.current = null;
+  };
+
+  const consumeCreativeSSE = async (
+    resp: Response,
+    onEvent: (payload: any) => void,
+  ) => {
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("创作流响应不可读取");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        try {
+          onEvent(JSON.parse(raw));
+        } catch {
+          // ignore broken chunk
+        }
+      }
     }
   };
 
   const startCreativeRun = async (promptText: string) => {
     setCreativeBusy(true);
-    setCreativeNotice({ type: "info", message: "创作任务已提交，正在生成 Pre-Agent 方案，请稍候..." });
+    setCreativeNotice({ type: "info", message: "创作任务已提交，正在建立 SSE 流..." });
     setStatus("处理中...");
     try {
-      const resp = await fetch("/api/creative/run/start", {
+      const resp = await fetch("/api/creative/run/start/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2109,14 +2176,43 @@ function App() {
         setStatus("连接失败");
         return;
       }
-      const data = (await resp.json()) as { run?: CreativeRun };
-      const nextRun = data.run || null;
-      setCreativeRun(nextRun);
-      setCreativeFeedback("");
-      if (nextRun && isCreativeProcessingStatus(nextRun.status)) {
-        setCreativeNotice({ type: "info", message: "创作任务已受理，系统正在后台处理中..." });
-      } else {
-        setCreativeNotice(null);
+      let latestRun: CreativeRun | null = null;
+      await consumeCreativeSSE(resp, (event) => {
+        const eventType = String(event?.type || "");
+        if (eventType === "ack") {
+          const run = (event?.run as CreativeRun | undefined) || null;
+          latestRun = run;
+          setCreativeRun(run);
+          setCreativeFeedback("");
+          if (run?.run_id) {
+            beginCreativeStreamMessage(run.run_id);
+          }
+          setCreativeNotice({ type: "info", message: "任务已受理，正在流式生成 Pre-Agent 方案..." });
+          return;
+        }
+        if (eventType === "chunk") {
+          const text = String(event?.text || "");
+          appendCreativeStreamChunkToDialog(text);
+          setCreativeNotice({ type: "info", message: "正在流式生成 Pre-Agent 方案..." });
+          return;
+        }
+        if (eventType === "done") {
+          const run = (event?.run as CreativeRun | undefined) || null;
+          latestRun = run;
+          setCreativeRun(run);
+          finishCreativeStreamMessage();
+          setCreativeNotice(null);
+          return;
+        }
+        if (eventType === "error") {
+          const errMsg = String(event?.message || "创作模式处理失败");
+          addLog(`创作模式流处理失败: ${errMsg}`, "error");
+          finishCreativeStreamMessage();
+          setCreativeNotice({ type: "error", message: errMsg });
+        }
+      });
+      if (!latestRun) {
+        await fetchActiveCreativeRun(sessionId);
       }
       setInput("");
       setSelectedFiles(new Set());
@@ -2125,6 +2221,7 @@ function App() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "启动创作模式失败";
       addLog(`创作模式启动失败: ${msg}`, "error");
+      finishCreativeStreamMessage();
       setCreativeNotice({ type: "error", message: msg });
       setStatus("连接失败");
     } finally {
@@ -2140,18 +2237,14 @@ function App() {
   ) => {
     if (!creativeRun?.run_id) return;
     setCreativeBusy(true);
-    setCreativeNotice({ type: "info", message: "正在处理你的操作，创作内容生成可能需要 10-60 秒..." });
+    setCreativeNotice({ type: "info", message: "正在建立 SSE 流并提交你的操作..." });
     setStatus("处理中...");
     try {
-      const resp = await fetchWithTimeout(
-        path,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        120000,
-      );
+      const resp = await fetch(`${path}/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       if (!resp.ok) {
         const errMsg = await parseApiErrorMessage(resp, fallbackError);
         addLog(`创作模式操作失败: ${errMsg}`, "error");
@@ -2159,30 +2252,50 @@ function App() {
         setStatus("连接失败");
         return;
       }
-      const data = (await resp.json()) as { run?: CreativeRun };
-      const nextRun = data.run || null;
-      setCreativeRun(nextRun);
-      setCreativeFeedback("");
-      if (nextRun && isCreativeProcessingStatus(nextRun.status)) {
-        setCreativeNotice({ type: "info", message: "任务已提交，后台正在处理，请稍候..." });
-      } else {
-        setCreativeNotice(null);
+      let latestRun: CreativeRun | null = null;
+      await consumeCreativeSSE(resp, (event) => {
+        const eventType = String(event?.type || "");
+        if (eventType === "ack") {
+          const run = (event?.run as CreativeRun | undefined) || null;
+          latestRun = run;
+          setCreativeRun(run);
+          setCreativeFeedback("");
+          if (run?.run_id) {
+            beginCreativeStreamMessage(run.run_id);
+          }
+          setCreativeNotice({ type: "info", message: "任务已受理，正在流式处理中..." });
+          return;
+        }
+        if (eventType === "chunk") {
+          const text = String(event?.text || "");
+          appendCreativeStreamChunkToDialog(text);
+          setCreativeNotice({ type: "info", message: "任务处理中，内容正在流式输出..." });
+          return;
+        }
+        if (eventType === "done") {
+          const run = (event?.run as CreativeRun | undefined) || null;
+          latestRun = run;
+          setCreativeRun(run);
+          finishCreativeStreamMessage();
+          setCreativeNotice(null);
+          return;
+        }
+        if (eventType === "error") {
+          const errMsg = String(event?.message || fallbackError);
+          addLog(`创作模式流处理失败: ${errMsg}`, "error");
+          finishCreativeStreamMessage();
+          setCreativeNotice({ type: "error", message: errMsg });
+        }
+      });
+      if (!latestRun) {
+        await fetchActiveCreativeRun(sessionId);
       }
       await fetchChatHistory(sessionId);
       await fetchChatSessions();
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        // 超时后端可能仍在执行，这里主动拉一次最新 run/history，防止前端状态停留在旧阶段。
-        const timeoutMsg = "处理时间较长，请稍后刷新。后台可能还在继续执行本次创作。";
-        addLog(`创作模式操作超时: ${timeoutMsg}`, "error");
-        setCreativeNotice({ type: "error", message: timeoutMsg });
-        await fetchActiveCreativeRun(sessionId);
-        await fetchChatHistory(sessionId);
-        setStatus("连接失败");
-        return;
-      }
       const msg = err instanceof Error ? err.message : fallbackError;
       addLog(`创作模式操作失败: ${msg}`, "error");
+      finishCreativeStreamMessage();
       setCreativeNotice({ type: "error", message: msg });
       setStatus("连接失败");
     } finally {

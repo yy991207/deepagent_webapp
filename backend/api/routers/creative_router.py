@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+import json
+import queue
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import StreamingResponse
 
 from backend.services.creative_agent_service import CreativeAppError
 from backend.services.creative_state_machine_service import CreativeStateMachineService
@@ -27,6 +31,74 @@ def _raise_creative_http_error(exc: Exception) -> None:
     if isinstance(exc, CreativeAppError):
         raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
     raise HTTPException(status_code=500, detail={"code": "CREATIVE_INTERNAL_ERROR", "message": str(exc)}) from exc
+
+
+def _sse_event(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _creative_sse_response(
+    *,
+    ack_run: dict[str, Any],
+    stage: str,
+    worker: Callable[[Callable[[str], None]], dict[str, Any]],
+    on_failure: Callable[[str], None],
+) -> StreamingResponse:
+    out_queue: queue.Queue[dict[str, Any] | object] = queue.Queue()
+    sentinel = object()
+
+    def emit_chunk(text: str) -> None:
+        chunk = str(text or "")
+        if chunk:
+            out_queue.put({"type": "chunk", "stage": stage, "text": chunk})
+
+    def run_worker() -> None:
+        try:
+            done_run = worker(emit_chunk)
+            out_queue.put({"type": "done", "run": done_run})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("creative sse worker failed | stage=%s | run_id=%s", stage, ack_run.get("run_id"))
+            err = str(exc)
+            try:
+                on_failure(err)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "creative sse failure fallback failed | stage=%s | run_id=%s",
+                    stage,
+                    ack_run.get("run_id"),
+                )
+            if isinstance(exc, CreativeAppError):
+                out_queue.put(
+                    {"type": "error", "code": exc.code, "message": exc.message},
+                )
+            else:
+                out_queue.put(
+                    {"type": "error", "code": "CREATIVE_INTERNAL_ERROR", "message": err},
+                )
+        finally:
+            out_queue.put(sentinel)
+
+    # 关键逻辑：SSE 主线程只负责持续吐 chunk；重计算在独立线程内创建并消费对象，避免跨线程复用异步资源。
+    threading.Thread(target=run_worker, daemon=True).start()
+
+    def event_iter():
+        yield _sse_event({"type": "ack", "run": ack_run})
+        while True:
+            item = out_queue.get()
+            if item is sentinel:
+                break
+            if isinstance(item, dict):
+                yield _sse_event(item)
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _run_start_background(run_id: str) -> None:
@@ -107,6 +179,33 @@ def creative_run_start(payload: dict[str, Any], background_tasks: BackgroundTask
         _raise_creative_http_error(exc)
 
 
+@router.post("/api/creative/run/start/stream")
+def creative_run_start_stream(payload: dict[str, Any]) -> StreamingResponse:
+    text = str(payload.get("text") or "").strip()
+    session_id = str(payload.get("session_id") or payload.get("thread_id") or generate_snowflake_id())
+    assistant_id = str(payload.get("assistant_id") or "agent")
+    files = payload.get("files") or []
+    checklist = payload.get("checklist") or []
+
+    try:
+        run = _service().start_run(
+            session_id=session_id,
+            assistant_id=assistant_id,
+            user_prompt=text,
+            file_refs=[str(x) for x in files] if isinstance(files, list) else [],
+            checklist=[str(x) for x in checklist] if isinstance(checklist, list) else None,
+        )
+        run_id = str(run.get("run_id") or "")
+        return _creative_sse_response(
+            ack_run=run,
+            stage="start",
+            worker=lambda on_chunk: _service().process_start_run(run_id=run_id, on_chunk=on_chunk),
+            on_failure=lambda err: _service().mark_async_failure(run_id=run_id, stage="start", error_message=err),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_creative_http_error(exc)
+
+
 @router.post("/api/creative/run/{run_id}/pre-agent/decision")
 def creative_pre_agent_decision(run_id: str, payload: dict[str, Any], background_tasks: BackgroundTasks) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip().lower()
@@ -116,6 +215,27 @@ def creative_pre_agent_decision(run_id: str, payload: dict[str, Any], background
         # 先返回 processing 状态，再由后台线程推进到下一状态。
         background_tasks.add_task(_run_pre_agent_background, run_id, action, feedback)
         return {"success": True, "run": run}
+    except Exception as exc:  # noqa: BLE001
+        _raise_creative_http_error(exc)
+
+
+@router.post("/api/creative/run/{run_id}/pre-agent/decision/stream")
+def creative_pre_agent_decision_stream(run_id: str, payload: dict[str, Any]) -> StreamingResponse:
+    action = str(payload.get("action") or "").strip().lower()
+    feedback = str(payload.get("feedback") or "")
+    try:
+        run = _service().submit_pre_agent_decision(run_id=run_id, action=action, feedback=feedback)
+        return _creative_sse_response(
+            ack_run=run,
+            stage="pre_agent",
+            worker=lambda on_chunk: _service().pre_agent_decision(
+                run_id=run_id,
+                action=action,
+                feedback=feedback,
+                on_chunk=on_chunk,
+            ),
+            on_failure=lambda err: _service().mark_async_failure(run_id=run_id, stage="pre_agent", error_message=err),
+        )
     except Exception as exc:  # noqa: BLE001
         _raise_creative_http_error(exc)
 
@@ -133,6 +253,27 @@ def creative_requirement_decision(run_id: str, payload: dict[str, Any], backgrou
         _raise_creative_http_error(exc)
 
 
+@router.post("/api/creative/run/{run_id}/requirement/decision/stream")
+def creative_requirement_decision_stream(run_id: str, payload: dict[str, Any]) -> StreamingResponse:
+    action = str(payload.get("action") or "").strip().lower()
+    feedback = str(payload.get("feedback") or "")
+    try:
+        run = _service().submit_requirement_decision(run_id=run_id, action=action, feedback=feedback)
+        return _creative_sse_response(
+            ack_run=run,
+            stage="requirement",
+            worker=lambda on_chunk: _service().requirement_decision(
+                run_id=run_id,
+                action=action,
+                feedback=feedback,
+                on_chunk=on_chunk,
+            ),
+            on_failure=lambda err: _service().mark_async_failure(run_id=run_id, stage="requirement", error_message=err),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_creative_http_error(exc)
+
+
 @router.post("/api/creative/run/{run_id}/draft/decision")
 def creative_draft_decision(run_id: str, payload: dict[str, Any], background_tasks: BackgroundTasks) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip().lower()
@@ -146,6 +287,27 @@ def creative_draft_decision(run_id: str, payload: dict[str, Any], background_tas
         _raise_creative_http_error(exc)
 
 
+@router.post("/api/creative/run/{run_id}/draft/decision/stream")
+def creative_draft_decision_stream(run_id: str, payload: dict[str, Any]) -> StreamingResponse:
+    action = str(payload.get("action") or "").strip().lower()
+    feedback = str(payload.get("feedback") or "")
+    try:
+        run = _service().submit_draft_decision(run_id=run_id, action=action, feedback=feedback)
+        return _creative_sse_response(
+            ack_run=run,
+            stage="draft",
+            worker=lambda on_chunk: _service().draft_decision(
+                run_id=run_id,
+                action=action,
+                feedback=feedback,
+                on_chunk=on_chunk,
+            ),
+            on_failure=lambda err: _service().mark_async_failure(run_id=run_id, stage="draft", error_message=err),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _raise_creative_http_error(exc)
+
+
 @router.post("/api/creative/run/{run_id}/round/decision")
 def creative_round_decision(run_id: str, payload: dict[str, Any], background_tasks: BackgroundTasks) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip().lower()
@@ -154,6 +316,25 @@ def creative_round_decision(run_id: str, payload: dict[str, Any], background_tas
         # 先返回 processing 状态，再由后台线程推进到下一状态。
         background_tasks.add_task(_run_round_background, run_id, action)
         return {"success": True, "run": run}
+    except Exception as exc:  # noqa: BLE001
+        _raise_creative_http_error(exc)
+
+
+@router.post("/api/creative/run/{run_id}/round/decision/stream")
+def creative_round_decision_stream(run_id: str, payload: dict[str, Any]) -> StreamingResponse:
+    action = str(payload.get("action") or "").strip().lower()
+    try:
+        run = _service().submit_round_decision(run_id=run_id, action=action)
+        return _creative_sse_response(
+            ack_run=run,
+            stage="round",
+            worker=lambda on_chunk: _service().round_decision(
+                run_id=run_id,
+                action=action,
+                on_chunk=on_chunk,
+            ),
+            on_failure=lambda err: _service().mark_async_failure(run_id=run_id, stage="round", error_message=err),
+        )
     except Exception as exc:  # noqa: BLE001
         _raise_creative_http_error(exc)
 

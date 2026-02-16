@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from backend.database.mongo_manager import get_beijing_time, get_mongo_manager
 from backend.services.chat_service import ChatService
@@ -220,13 +220,18 @@ class CreativeStateMachineService:
 
         return self._apply_and_build_run(run_doc, {"created_at": now, "updated_at": now})
 
-    def process_start_run(self, *, run_id: str) -> dict[str, Any]:
+    def process_start_run(
+        self,
+        *,
+        run_id: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         run = self._load_run(run_id=run_id)
         if str(run.get("status")) not in {"pre_agent_generating", "pre_agent_pending_confirm"}:
             raise CreativeAppError("CREATIVE_STATE_INVALID", "当前状态不允许生成 Pre-Agent 方案")
 
         planner = LlmPreAgentPlanner()
-        plan = planner.plan(user_prompt=str(run.get("user_prompt") or ""), feedback="")
+        plan = planner.plan(user_prompt=str(run.get("user_prompt") or ""), feedback="", on_chunk=on_chunk)
         now = get_beijing_time()
         updates = {
             "status": "pre_agent_pending_confirm",
@@ -346,7 +351,14 @@ class CreativeStateMachineService:
         )
         return next_run
 
-    def pre_agent_decision(self, *, run_id: str, action: str, feedback: str) -> dict[str, Any]:
+    def pre_agent_decision(
+        self,
+        *,
+        run_id: str,
+        action: str,
+        feedback: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         run = self._load_run(run_id=run_id)
         if str(run.get("status")) not in {"pre_agent_pending_confirm", "pre_agent_processing"}:
             raise CreativeAppError("CREATIVE_STATE_INVALID", "当前状态不允许处理 Pre-Agent 决策")
@@ -363,7 +375,11 @@ class CreativeStateMachineService:
                 action="重新生成方案",
                 feedback=feedback,
             )
-            plan = planner.plan(user_prompt=str(run.get("user_prompt") or ""), feedback=str(feedback or ""))
+            plan = planner.plan(
+                user_prompt=str(run.get("user_prompt") or ""),
+                feedback=str(feedback or ""),
+                on_chunk=on_chunk,
+            )
             now = get_beijing_time()
             updates = {
                 "status": "pre_agent_pending_confirm",
@@ -395,6 +411,7 @@ class CreativeStateMachineService:
             clarified = client.clarify_requirement(
                 user_prompt=str(run.get("user_prompt") or ""),
                 feedback="",
+                on_chunk=on_chunk,
             )
         finally:
             client.close()
@@ -413,7 +430,14 @@ class CreativeStateMachineService:
         )
         return next_run
 
-    def requirement_decision(self, *, run_id: str, action: str, feedback: str) -> dict[str, Any]:
+    def requirement_decision(
+        self,
+        *,
+        run_id: str,
+        action: str,
+        feedback: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         run = self._load_run(run_id=run_id)
         if str(run.get("status")) not in {"requirement_pending_confirm", "requirement_processing"}:
             raise CreativeAppError("CREATIVE_STATE_INVALID", "当前状态不允许处理需求确认")
@@ -441,6 +465,7 @@ class CreativeStateMachineService:
                 clarified = client.clarify_requirement(
                     user_prompt=str(run.get("user_prompt") or ""),
                     feedback=str(feedback or ""),
+                    on_chunk=on_chunk,
                 )
                 now = get_beijing_time()
                 updates = {
@@ -462,6 +487,7 @@ class CreativeStateMachineService:
                 clarified_requirement=str(run.get("clarified_requirement") or ""),
                 issues=[str(x) for x in (run.get("issues") or [])],
                 c_reason=str(run.get("c_reason") or ""),
+                on_chunk=on_chunk,
             )
             now = get_beijing_time()
             updates = {
@@ -479,7 +505,14 @@ class CreativeStateMachineService:
         finally:
             client.close()
 
-    def draft_decision(self, *, run_id: str, action: str, feedback: str) -> dict[str, Any]:
+    def draft_decision(
+        self,
+        *,
+        run_id: str,
+        action: str,
+        feedback: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         run = self._load_run(run_id=run_id)
         if str(run.get("status")) not in {"draft_pending_confirm", "draft_processing"}:
             raise CreativeAppError("CREATIVE_STATE_INVALID", "当前状态不允许处理草稿决策")
@@ -512,6 +545,7 @@ class CreativeStateMachineService:
                     clarified_requirement=str(run.get("clarified_requirement") or ""),
                     issues=issues,
                     c_reason=c_reason,
+                    on_chunk=on_chunk,
                 )
                 now = get_beijing_time()
                 updates = {
@@ -536,12 +570,14 @@ class CreativeStateMachineService:
                 demo_doc=str(run.get("demo_doc") or ""),
                 checklist=[str(x) for x in (run.get("checklist") or [])],
                 c_reason=str(run.get("c_reason") or ""),
+                on_chunk=on_chunk,
             )
             judgement, reason = client.judge_issues(
                 user_prompt=str(run.get("user_prompt") or ""),
                 clarified_requirement=str(run.get("clarified_requirement") or ""),
                 demo_doc=str(run.get("demo_doc") or ""),
                 issues=issues,
+                on_chunk=on_chunk,
             )
             now = get_beijing_time()
             updates = {
@@ -561,7 +597,13 @@ class CreativeStateMachineService:
         finally:
             client.close()
 
-    def round_decision(self, *, run_id: str, action: str) -> dict[str, Any]:
+    def round_decision(
+        self,
+        *,
+        run_id: str,
+        action: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         run = self._load_run(run_id=run_id)
         if str(run.get("status")) not in {"bc_review_done", "round_processing"}:
             raise CreativeAppError("CREATIVE_STATE_INVALID", "当前状态不允许处理轮次决策")
@@ -651,6 +693,7 @@ class CreativeStateMachineService:
                 clarified_requirement=str(run.get("clarified_requirement") or ""),
                 issues=[str(x) for x in (run.get("issues") or [])],
                 c_reason=str(run.get("c_reason") or ""),
+                on_chunk=on_chunk,
             )
         finally:
             client.close()

@@ -11,7 +11,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
@@ -141,7 +141,13 @@ class LlmPreAgentPlanner:
             return "\n".join(parts)
         return str(content or "")
 
-    def plan(self, *, user_prompt: str, feedback: str = "") -> PromptPlan:
+    def plan(
+        self,
+        *,
+        user_prompt: str,
+        feedback: str = "",
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> PromptPlan:
         prompt = (
             "你是 Pre-Agent，需要为 A/B/C 三个 Agent 生成角色 Prompt。\n"
             "目标：支持任意文本内容生成（例如开发文档、文案、脚本）。\n"
@@ -163,6 +169,8 @@ class LlmPreAgentPlanner:
                 text = self._content_to_text(getattr(chunk, "content", ""))
                 if text:
                     chunks.append(text)
+                    if on_chunk:
+                        on_chunk(text)
         except Exception:
             chunks = []
 
@@ -308,7 +316,14 @@ class DeepCreativeAgentClient:
             return self._thread_id_b
         return self._thread_id_c
 
-    def _invoke_text(self, *, agent: Any, prompt: str, agent_name: str) -> str:
+    def _invoke_text(
+        self,
+        *,
+        agent: Any,
+        prompt: str,
+        agent_name: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> str:
         chunks: list[str] = []
         invoke_payload = {"messages": [{"role": "user", "content": prompt}]}
         invoke_config = {"configurable": {"thread_id": self._thread_id_for(agent_name)}}
@@ -329,6 +344,8 @@ class DeepCreativeAgentClient:
                         chunk_text = self._content_to_text(getattr(message_chunk, "content", ""))
                     if chunk_text:
                         chunks.append(chunk_text)
+                        if on_chunk:
+                            on_chunk(chunk_text)
             except Exception:
                 chunks = []
 
@@ -336,11 +353,19 @@ class DeepCreativeAgentClient:
             if not text:
                 result = agent.invoke(invoke_payload, config=invoke_config)
                 text = self._extract_last_text(result)
+                if text and on_chunk:
+                    on_chunk(text)
             return text
         except Exception as exc:
             raise CreativeAppError("LLM_CALL_FAILED", str(exc)) from exc
 
-    def clarify_requirement(self, *, user_prompt: str, feedback: str) -> str:
+    def clarify_requirement(
+        self,
+        *,
+        user_prompt: str,
+        feedback: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> str:
         prompt = (
             "请做需求理解与澄清。"
             f"\n目标内容类型: {self._prompt_plan.content_goal}"
@@ -349,7 +374,7 @@ class DeepCreativeAgentClient:
             f"\n用户需求: {user_prompt}"
             f"\n用户反馈: {feedback or '无'}"
         )
-        return self._invoke_text(agent=self._agent_a, prompt=prompt, agent_name="agent_a")
+        return self._invoke_text(agent=self._agent_a, prompt=prompt, agent_name="agent_a", on_chunk=on_chunk)
 
     def draft_doc(
         self,
@@ -358,6 +383,7 @@ class DeepCreativeAgentClient:
         clarified_requirement: str,
         issues: list[str],
         c_reason: str,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> str:
         prompt = (
             f"请输出目标内容成品，目标类型: {self._prompt_plan.content_goal}。"
@@ -368,7 +394,7 @@ class DeepCreativeAgentClient:
             f"\n待修复问题: {issues if issues else '无'}"
             f"\nAgent C 判定意见: {c_reason or '无'}"
         )
-        return self._invoke_text(agent=self._agent_a, prompt=prompt, agent_name="agent_a")
+        return self._invoke_text(agent=self._agent_a, prompt=prompt, agent_name="agent_a", on_chunk=on_chunk)
 
     def review_doc(
         self,
@@ -378,6 +404,7 @@ class DeepCreativeAgentClient:
         demo_doc: str,
         checklist: list[str],
         c_reason: str,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> list[str]:
         prompt = (
             "请从校验视角审查当前内容并返回问题列表。"
@@ -390,7 +417,9 @@ class DeepCreativeAgentClient:
             f"\n校验清单: {checklist}"
             f"\nAgent C 反馈(若有): {c_reason or '无'}"
         )
-        parsed = self._safe_json(self._invoke_text(agent=self._agent_b, prompt=prompt, agent_name="agent_b"))
+        parsed = self._safe_json(
+            self._invoke_text(agent=self._agent_b, prompt=prompt, agent_name="agent_b", on_chunk=on_chunk)
+        )
         issues = parsed.get("issues", [])
         if isinstance(issues, list):
             return [str(item) for item in issues if str(item).strip()]
@@ -403,6 +432,7 @@ class DeepCreativeAgentClient:
         clarified_requirement: str,
         demo_doc: str,
         issues: list[str],
+        on_chunk: Callable[[str], None] | None = None,
     ) -> tuple[str, str]:
         prompt = (
             "请评估 Agent B 提出的问题是否合理并返回 JSON。"
@@ -414,7 +444,9 @@ class DeepCreativeAgentClient:
             f"\n当前内容:\n{demo_doc}"
             f"\n问题清单: {issues}"
         )
-        parsed = self._safe_json(self._invoke_text(agent=self._agent_c, prompt=prompt, agent_name="agent_c"))
+        parsed = self._safe_json(
+            self._invoke_text(agent=self._agent_c, prompt=prompt, agent_name="agent_c", on_chunk=on_chunk)
+        )
         judgement = str(parsed.get("judgement", "unreasonable")).lower()
         reason = str(parsed.get("reason", "未给出理由"))
         if judgement not in {"reasonable", "unreasonable"}:
