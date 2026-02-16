@@ -19,6 +19,7 @@ import type {
   PodcastEpisodeProfile,
   VoiceOption,
   SourceItem,
+  CreativeRun,
 } from "./types";
 
 import {
@@ -566,6 +567,11 @@ function App() {
   const [input, setInput] = useState("");
   const [searchValue, setSearchValue] = useState("");
   const [status, setStatus] = useState("就绪");
+  const [creativeModeEnabled, setCreativeModeEnabled] = useState(false);
+  const [creativeRun, setCreativeRun] = useState<CreativeRun | null>(null);
+  const [creativeFeedback, setCreativeFeedback] = useState("");
+  const [creativeBusy, setCreativeBusy] = useState(false);
+  const [creativeNotice, setCreativeNotice] = useState<{ type: "info" | "error"; message: string } | null>(null);
   const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
@@ -613,6 +619,13 @@ function App() {
   const [podcastSelectedSpeaker, setPodcastSelectedSpeaker] = useState<string>("");
   const [podcastEpisodeName, setPodcastEpisodeName] = useState<string>("");
   const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState<string>("");
+
+  const isCreativeProcessingStatus = (status?: string | null) =>
+    status === "pre_agent_generating" ||
+    status === "pre_agent_processing" ||
+    status === "requirement_processing" ||
+    status === "draft_processing" ||
+    status === "round_processing";
   const [podcastSelectedSourceIds, setPodcastSelectedSourceIds] = useState<Set<string>>(new Set());
   const [podcastSources, setPodcastSources] = useState<UploadedSource[]>([]);
   const [podcastSourcesLoading, setPodcastSourcesLoading] = useState(false);
@@ -851,6 +864,7 @@ function App() {
     void (async () => {
       await fetchChatHistory(sessionId);
       await resumeActiveStream(sessionId);
+      await fetchActiveCreativeRun(sessionId);
     })();
     void fetchChatSessions();
     void refreshMemoryStats(sessionId);
@@ -947,6 +961,72 @@ function App() {
     setChatSessions(Array.isArray(data.sessions) ? data.sessions : []);
   };
 
+  const fetchActiveCreativeRun = async (sid: string) => {
+    const session = String(sid || "").trim();
+    if (!session) {
+      setCreativeRun(null);
+      return;
+    }
+    try {
+      const resp = await fetch(
+        `/api/creative/runs?session_id=${encodeURIComponent(session)}&assistant_id=agent&active_only=true&limit=1`,
+      );
+      if (!resp.ok) {
+        setCreativeRun(null);
+        return;
+      }
+      const data = (await resp.json()) as { results?: CreativeRun[] };
+      const runs = Array.isArray(data.results) ? data.results : [];
+      setCreativeRun(runs.length > 0 ? runs[0] : null);
+    } catch {
+      setCreativeRun(null);
+    }
+  };
+
+  const fetchCreativeRunById = async (runId: string) => {
+    const normalizedRunId = String(runId || "").trim();
+    if (!normalizedRunId) return null;
+    try {
+      const resp = await fetch(`/api/creative/run/${encodeURIComponent(normalizedRunId)}`);
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { run?: CreativeRun };
+      return data.run || null;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const runId = String(creativeRun?.run_id || "").trim();
+    const runStatus = String(creativeRun?.status || "").trim();
+    if (!runId || !isCreativeProcessingStatus(runStatus)) {
+      return;
+    }
+
+    let stopped = false;
+    const poll = async () => {
+      if (stopped) return;
+      const latest = await fetchCreativeRunById(runId);
+      if (!latest || stopped) return;
+      setCreativeRun(latest);
+      if (!isCreativeProcessingStatus(latest.status)) {
+        setCreativeNotice(null);
+        await fetchChatHistory(sessionId);
+        await fetchChatSessions();
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [creativeRun?.run_id, creativeRun?.status, sessionId]);
+
   const createNewSession = async () => {
     const resp = await fetch("/api/chat/session", {
       method: "POST",
@@ -976,6 +1056,7 @@ function App() {
     }
     await fetchChatHistory(next);
     await refreshMemoryStats(next);
+    await fetchActiveCreativeRun(next);
   };
 
   const requestDeleteSession = (sid: string) => {
@@ -1007,6 +1088,7 @@ function App() {
         await switchSession(newSid);
       } else {
         setMessages([]);
+        setCreativeRun(null);
       }
     }
   };
@@ -1980,9 +2062,226 @@ function App() {
     }
   };
 
+  const parseApiErrorMessage = async (resp: Response, fallback: string) => {
+    try {
+      const data = await resp.json();
+      const detail = (data && (data.detail || data.message)) || {};
+      if (typeof detail === "string" && detail.trim()) return detail;
+      if (detail && typeof detail === "object" && typeof detail.message === "string") return detail.message;
+      if (data && typeof data.message === "string") return data.message;
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
+    // 避免长耗时请求让按钮长期无反馈：到期主动中断并交给上层统一提示。
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+
+  const startCreativeRun = async (promptText: string) => {
+    setCreativeBusy(true);
+    setCreativeNotice({ type: "info", message: "创作任务已提交，正在生成 Pre-Agent 方案，请稍候..." });
+    setStatus("处理中...");
+    try {
+      const resp = await fetch("/api/creative/run/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: promptText,
+          files: selectedList,
+          session_id: sessionId,
+          assistant_id: "agent",
+        }),
+      });
+      if (!resp.ok) {
+        const errMsg = await parseApiErrorMessage(resp, "启动创作模式失败");
+        addLog(`创作模式启动失败: ${errMsg}`, "error");
+        setCreativeNotice({ type: "error", message: errMsg });
+        await fetchActiveCreativeRun(sessionId);
+        setStatus("连接失败");
+        return;
+      }
+      const data = (await resp.json()) as { run?: CreativeRun };
+      const nextRun = data.run || null;
+      setCreativeRun(nextRun);
+      setCreativeFeedback("");
+      if (nextRun && isCreativeProcessingStatus(nextRun.status)) {
+        setCreativeNotice({ type: "info", message: "创作任务已受理，系统正在后台处理中..." });
+      } else {
+        setCreativeNotice(null);
+      }
+      setInput("");
+      setSelectedFiles(new Set());
+      await fetchChatHistory(sessionId);
+      await fetchChatSessions();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "启动创作模式失败";
+      addLog(`创作模式启动失败: ${msg}`, "error");
+      setCreativeNotice({ type: "error", message: msg });
+      setStatus("连接失败");
+    } finally {
+      setStatus("就绪");
+      setCreativeBusy(false);
+    }
+  };
+
+  const runCreativeDecision = async (
+    path: string,
+    payload: Record<string, unknown>,
+    fallbackError: string,
+  ) => {
+    if (!creativeRun?.run_id) return;
+    setCreativeBusy(true);
+    setCreativeNotice({ type: "info", message: "正在处理你的操作，创作内容生成可能需要 10-60 秒..." });
+    setStatus("处理中...");
+    try {
+      const resp = await fetchWithTimeout(
+        path,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        120000,
+      );
+      if (!resp.ok) {
+        const errMsg = await parseApiErrorMessage(resp, fallbackError);
+        addLog(`创作模式操作失败: ${errMsg}`, "error");
+        setCreativeNotice({ type: "error", message: errMsg });
+        setStatus("连接失败");
+        return;
+      }
+      const data = (await resp.json()) as { run?: CreativeRun };
+      const nextRun = data.run || null;
+      setCreativeRun(nextRun);
+      setCreativeFeedback("");
+      if (nextRun && isCreativeProcessingStatus(nextRun.status)) {
+        setCreativeNotice({ type: "info", message: "任务已提交，后台正在处理，请稍候..." });
+      } else {
+        setCreativeNotice(null);
+      }
+      await fetchChatHistory(sessionId);
+      await fetchChatSessions();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // 超时后端可能仍在执行，这里主动拉一次最新 run/history，防止前端状态停留在旧阶段。
+        const timeoutMsg = "处理时间较长，请稍后刷新。后台可能还在继续执行本次创作。";
+        addLog(`创作模式操作超时: ${timeoutMsg}`, "error");
+        setCreativeNotice({ type: "error", message: timeoutMsg });
+        await fetchActiveCreativeRun(sessionId);
+        await fetchChatHistory(sessionId);
+        setStatus("连接失败");
+        return;
+      }
+      const msg = err instanceof Error ? err.message : fallbackError;
+      addLog(`创作模式操作失败: ${msg}`, "error");
+      setCreativeNotice({ type: "error", message: msg });
+      setStatus("连接失败");
+    } finally {
+      setStatus("就绪");
+      setCreativeBusy(false);
+    }
+  };
+
+  const submitCreativePreAgent = async (action: "confirm" | "regenerate") => {
+    if (!creativeRun?.run_id) return;
+    await runCreativeDecision(
+      `/api/creative/run/${encodeURIComponent(creativeRun.run_id)}/pre-agent/decision`,
+      { action, feedback: creativeFeedback },
+      "Pre-Agent 阶段处理失败",
+    );
+  };
+
+  const submitCreativeRequirement = async (action: "confirm" | "revise") => {
+    if (!creativeRun?.run_id) return;
+    if (action === "revise" && !creativeFeedback.trim()) {
+      setCreativeNotice({ type: "error", message: "请先填写反馈，再重新生成需求理解。" });
+      return;
+    }
+    await runCreativeDecision(
+      `/api/creative/run/${encodeURIComponent(creativeRun.run_id)}/requirement/decision`,
+      { action, feedback: creativeFeedback },
+      "需求确认阶段处理失败",
+    );
+  };
+
+  const submitCreativeDraft = async (action: "confirm" | "revise") => {
+    if (!creativeRun?.run_id) return;
+    if (action === "revise" && !creativeFeedback.trim()) {
+      setCreativeNotice({ type: "error", message: "请先填写反馈，再继续修稿。" });
+      return;
+    }
+    await runCreativeDecision(
+      `/api/creative/run/${encodeURIComponent(creativeRun.run_id)}/draft/decision`,
+      { action, feedback: creativeFeedback },
+      "草稿阶段处理失败",
+    );
+  };
+
+  const submitCreativeRound = async (action: "finalize" | "next_round") => {
+    if (!creativeRun?.run_id) return;
+    await runCreativeDecision(
+      `/api/creative/run/${encodeURIComponent(creativeRun.run_id)}/round/decision`,
+      { action },
+      "轮次决策处理失败",
+    );
+  };
+
+  const cancelCreativeRun = async () => {
+    if (!creativeRun?.run_id) return;
+    setCreativeBusy(true);
+    setCreativeNotice({ type: "info", message: "正在取消当前创作任务..." });
+    setStatus("处理中...");
+    try {
+      const resp = await fetch(
+        `/api/creative/run/${encodeURIComponent(creativeRun.run_id)}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: "用户主动取消" }),
+        },
+      );
+      if (!resp.ok) {
+        const errMsg = await parseApiErrorMessage(resp, "取消创作任务失败");
+        addLog(`取消创作任务失败: ${errMsg}`, "error");
+        setCreativeNotice({ type: "error", message: errMsg });
+        setStatus("连接失败");
+        return;
+      }
+      const data = (await resp.json()) as { run?: CreativeRun };
+      setCreativeRun(data.run || null);
+      setCreativeFeedback("");
+      setCreativeNotice(null);
+      await fetchChatHistory(sessionId);
+      await fetchChatSessions();
+      await fetchActiveCreativeRun(sessionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "取消创作任务失败";
+      addLog(`取消创作任务失败: ${msg}`, "error");
+      setCreativeNotice({ type: "error", message: msg });
+      setStatus("连接失败");
+    } finally {
+      setStatus("就绪");
+      setCreativeBusy(false);
+    }
+  };
+
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed) {
+      return;
+    }
+    if (creativeModeEnabled) {
+      await cancelActiveStream(sessionId);
+      await startCreativeRun(trimmed);
       return;
     }
     await cancelActiveStream(sessionId);
@@ -2716,7 +3015,7 @@ function App() {
             <div className="input-wrapper">
               <textarea
                 rows={1}
-                placeholder="用 DeepAgents 创造无限可能"
+                placeholder={creativeModeEnabled ? "输入创作需求，进入多智能体创作模式" : "用 DeepAgents 创造无限可能"}
                 value={input}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;
@@ -2728,6 +3027,29 @@ function App() {
               />
               <div className="input-footer">
                 <div className="input-actions-left">
+                  <button
+                    type="button"
+                    className="input-action-btn"
+                    title="创作模式"
+                    style={{
+                      width: "auto",
+                      minWidth: 88,
+                      height: 32,
+                      paddingInline: 12,
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: "32px",
+                      border: creativeModeEnabled ? "1px solid #0d6efd" : "1px solid transparent",
+                      background: creativeModeEnabled ? "rgba(13, 110, 253, 0.1)" : "transparent",
+                      color: creativeModeEnabled ? "#0d6efd" : undefined,
+                    }}
+                    onClick={() => {
+                      setCreativeModeEnabled((prev) => !prev);
+                    }}
+                  >
+                    创作模式
+                  </button>
                   <button type="button" className="input-action-btn" title="添加">
                     <Icons.Plus />
                   </button>
@@ -2756,12 +3078,157 @@ function App() {
                       <Icons.Stop />
                     </button>
                   ) : null}
-                  <button className="send-btn" onClick={sendMessage} disabled={!input.trim()}>
+                  <button className="send-btn" onClick={sendMessage} disabled={!input.trim() || creativeBusy}>
                     <Icons.Send />
                   </button>
                 </div>
               </div>
             </div>
+            {(creativeModeEnabled || !!creativeRun) ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  border: "1px solid #d9dee5",
+                  borderRadius: 10,
+                  padding: 10,
+                  background: "#f7f9fc",
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 8 }}>
+                  当前模式：创作模式（Pre-Agent + A/B/C + Human in the loop）
+                  {creativeRun ? ` ｜ run_id: ${creativeRun.run_id}` : " ｜ 尚未开始"}
+                </div>
+                {creativeRun && creativeRun.status !== "completed" ? (
+                  <>
+                    {creativeNotice ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          marginBottom: 8,
+                          color: creativeNotice.type === "error" ? "#dc2626" : "#2563eb",
+                        }}
+                      >
+                        {creativeNotice.message}
+                      </div>
+                    ) : null}
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                      <button
+                        type="button"
+                        className="add-source-action"
+                        disabled={creativeBusy}
+                        onClick={() => void cancelCreativeRun()}
+                      >
+                        取消当前创作任务
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      placeholder="需要重生成时，在这里补充你的反馈（重新生成时必填）"
+                      value={creativeFeedback}
+                      onChange={(e) => setCreativeFeedback(e.target.value)}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        border: "1px solid #d1d5db",
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        fontSize: 13,
+                        background: "#fff",
+                        minHeight: 52,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      {creativeRun.status === "pre_agent_pending_confirm" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="add-source-action primary"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativePreAgent("confirm")}
+                          >
+                            确认方案
+                          </button>
+                          <button
+                            type="button"
+                            className="add-source-action"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativePreAgent("regenerate")}
+                          >
+                            重新生成方案
+                          </button>
+                        </>
+                      ) : null}
+                      {creativeRun.status === "requirement_pending_confirm" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="add-source-action primary"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeRequirement("confirm")}
+                          >
+                            确认需求理解
+                          </button>
+                          <button
+                            type="button"
+                            className="add-source-action"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeRequirement("revise")}
+                          >
+                            重新生成需求理解
+                          </button>
+                        </>
+                      ) : null}
+                      {creativeRun.status === "draft_pending_confirm" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="add-source-action primary"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeDraft("confirm")}
+                          >
+                            草稿进入 B/C 审查
+                          </button>
+                          <button
+                            type="button"
+                            className="add-source-action"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeDraft("revise")}
+                          >
+                            按反馈继续修稿
+                          </button>
+                        </>
+                      ) : null}
+                      {creativeRun.status === "bc_review_done" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="add-source-action primary"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeRound("finalize")}
+                          >
+                            直接定稿
+                          </button>
+                          <button
+                            type="button"
+                            className="add-source-action"
+                            disabled={creativeBusy}
+                            onClick={() => void submitCreativeRound("next_round")}
+                          >
+                            进入下一轮 ABC
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    {creativeRun?.status === "completed"
+                      ? "当前创作任务已完成。你可以继续输入新需求发起下一次创作。"
+                      : "输入需求并发送后，会自动进入 Pre-Agent 方案确认阶段。"}
+                  </div>
+                )}
+              </div>
+            ) : null}
             <div className="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>
           </div>
         </main>

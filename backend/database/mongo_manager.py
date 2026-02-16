@@ -80,6 +80,14 @@ class MongoDbManager:
         client = self._get_client()
         return client[self._db_name][_DEFAULT_FILESYSTEM_WRITES_COLLECTION]
 
+    def _creative_runs_collection(self):
+        client = self._get_client()
+        return client[self._db_name][_DEFAULT_CREATIVE_RUNS_COLLECTION]
+
+    def _creative_final_docs_collection(self):
+        client = self._get_client()
+        return client[self._db_name][_DEFAULT_CREATIVE_FINAL_DOCS_COLLECTION]
+
     def _distributed_locks_collection(self):
         client = self._get_client()
         return client[self._db_name][_DEFAULT_DISTRIBUTED_LOCKS_COLLECTION]
@@ -943,6 +951,102 @@ class MongoDbManager:
             )
         return out
 
+    # ==================== Creative Mode 相关 ====================
+
+    def create_creative_run(self, *, run_doc: dict[str, Any]) -> None:
+        """创建创作模式运行记录。"""
+        # 关键逻辑：insert_one 会给原字典补 `_id`，这里用副本避免污染上层返回对象。
+        self._creative_runs_collection().insert_one(dict(run_doc))
+
+    def get_creative_run(self, *, run_id: str) -> dict[str, Any] | None:
+        """按 run_id 查询创作模式运行记录。"""
+        doc = self._creative_runs_collection().find_one({"run_id": run_id})
+        if not doc:
+            return None
+
+        out = {k: v for k, v in doc.items() if k != "_id"}
+        for key in ("created_at", "updated_at", "completed_at"):
+            value = out.get(key)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
+            if hasattr(value, "isoformat"):
+                out[key] = value.isoformat()
+        return out
+
+    def update_creative_run(self, *, run_id: str, set_fields: dict[str, Any]) -> bool:
+        """更新创作模式运行记录。"""
+        now = get_beijing_time()
+        payload = dict(set_fields)
+        payload["updated_at"] = now
+        result = self._creative_runs_collection().update_one(
+            {"run_id": run_id},
+            {"$set": payload},
+        )
+        return bool(result.modified_count)
+
+    def list_creative_runs(
+        self,
+        *,
+        session_id: str,
+        assistant_id: str = "agent",
+        active_only: bool = False,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """列出某个会话的创作模式运行记录。"""
+        query: dict[str, Any] = {
+            "session_id": session_id,
+            "assistant_id": assistant_id,
+        }
+        if active_only:
+            query["status"] = {"$nin": ["completed", "cancelled", "error"]}
+
+        cursor = (
+            self._creative_runs_collection()
+            .find(query, projection={"_id": 0})
+            .sort("updated_at", -1)
+            .limit(max(min(limit, 100), 1))
+        )
+
+        out: list[dict[str, Any]] = []
+        for item in cursor:
+            for key in ("created_at", "updated_at", "completed_at"):
+                value = item.get(key)
+                if isinstance(value, datetime) and value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
+                if hasattr(value, "isoformat"):
+                    item[key] = value.isoformat()
+            out.append(item)
+        return out
+
+    def save_creative_final_doc(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        assistant_id: str,
+        content: str,
+        title: str,
+        write_id: str | None = None,
+    ) -> None:
+        """保存创作模式终稿。"""
+        now = get_beijing_time()
+        self._creative_final_docs_collection().update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "run_id": run_id,
+                    "session_id": session_id,
+                    "assistant_id": assistant_id,
+                    "title": title,
+                    "content": content,
+                    "write_id": write_id,
+                    "updated_at": now,
+                },
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+        )
+
     def create_filesystem_write(
         self,
         *,
@@ -1106,12 +1210,16 @@ class MongoDbManager:
 
         fs_filter: dict[str, Any] = {"session_id": session_id}
         fs_res = self._filesystem_writes_collection().delete_many(fs_filter)
+        creative_runs_res = self._creative_runs_collection().delete_many(fs_filter)
+        creative_final_docs_res = self._creative_final_docs_collection().delete_many(fs_filter)
 
         return {
             "messages": int(getattr(msg_res, "deleted_count", 0) or 0),
             "memories": int(getattr(mem_res, "deleted_count", 0) or 0),
             "sessions": int(getattr(sess_res, "deleted_count", 0) or 0),
             "filesystem_writes": int(getattr(fs_res, "deleted_count", 0) or 0),
+            "creative_runs": int(getattr(creative_runs_res, "deleted_count", 0) or 0),
+            "creative_final_docs": int(getattr(creative_final_docs_res, "deleted_count", 0) or 0),
         }
 
     def list_chat_threads(self, *, assistant_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -1192,6 +1300,10 @@ _DEFAULT_CHAT_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_COLLECTION") or "cha
 _DEFAULT_CHAT_MEMORY_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_MEMORY_COLLECTION") or "agent_chat_memories"
 _DEFAULT_CHAT_SESSIONS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CHAT_SESSIONS_COLLECTION") or "chat_sessions"
 _DEFAULT_FILESYSTEM_WRITES_COLLECTION = os.getenv("DEEPAGENTS_MONGO_FILESYSTEM_WRITES_COLLECTION") or "filesystem_writes"
+_DEFAULT_CREATIVE_RUNS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_CREATIVE_RUNS_COLLECTION") or "creative_runs"
+_DEFAULT_CREATIVE_FINAL_DOCS_COLLECTION = (
+    os.getenv("DEEPAGENTS_MONGO_CREATIVE_FINAL_DOCS_COLLECTION") or "creative_final_docs"
+)
 _DEFAULT_DISTRIBUTED_LOCKS_COLLECTION = os.getenv("DEEPAGENTS_MONGO_DISTRIBUTED_LOCKS_COLLECTION") or "distributed_locks"
 
 

@@ -155,6 +155,50 @@ export type FilesystemWrite = {
   created_at: string;
 };
 
+export type CreativeRunStatus =
+  | "pre_agent_generating"
+  | "pre_agent_processing"
+  | "requirement_processing"
+  | "draft_processing"
+  | "round_processing"
+  | "pre_agent_pending_confirm"
+  | "requirement_pending_confirm"
+  | "draft_pending_confirm"
+  | "bc_review_done"
+  | "completed"
+  | "cancelled"
+  | "error";
+
+export type CreativePromptPlan = {
+  content_goal: string;
+  agent_a_prompt: string;
+  agent_b_prompt: string;
+  agent_c_prompt: string;
+  output_requirements: string;
+};
+
+export type CreativeRun = {
+  run_id: string;
+  session_id: string;
+  assistant_id: string;
+  status: CreativeRunStatus;
+  user_prompt: string;
+  file_refs?: string[];
+  prompt_plan: CreativePromptPlan;
+  clarified_requirement?: string;
+  checklist?: string[];
+  demo_doc?: string;
+  issues?: string[];
+  c_judgement?: string;
+  c_reason?: string;
+  final_doc?: string;
+  final_write_id?: string;
+  round_index: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+};
+
 type SocketPayloadBase = {
   session_id?: string;
 };
