@@ -323,6 +323,12 @@ class ChatStreamService:
         thread_id: str,
         assistant_id: str = "agent",
         file_refs: list[str] | None = None,
+        assistant_speaker: dict[str, str] | None = None,
+        user_speaker: dict[str, str] | None = None,
+        persist_user_message: bool = True,
+        persist_chat_memory: bool = True,
+        memory_user_text: str | None = None,
+        emit_suggested_questions: bool = True,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """流式处理聊天对话。
         
@@ -336,6 +342,12 @@ class ChatStreamService:
             thread_id: 会话唯一标识符（用于 checkpoint、记忆、沙箱等资源的会话级隔离）
             assistant_id: 助手标识符（用于多租户/多角色场景）
             file_refs: 附件的 MongoDB 文档 ID 列表（用于 RAG 检索）
+            assistant_speaker: 助手角色信息（群聊模式可选）
+            user_speaker: 用户角色信息（群聊模式可选）
+            persist_user_message: 是否落库用户消息（群聊多角色时仅首条写入）
+            persist_chat_memory: 是否更新 memory（群聊多角色时通常只在最后一位更新）
+            memory_user_text: 写入 memory 时使用的用户原文
+            emit_suggested_questions: 是否生成推荐问题
             
         Yields:
             SSE 事件字典，包含 type、session_id 等字段，具体类型包括：
@@ -381,12 +393,23 @@ class ChatStreamService:
 
         # 保存用户消息到 MongoDB（包含附件元数据）
         chat_service = ChatService()
-        chat_service.save_user_message(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-            content=str(text),
-            attachments=attachments_meta,
-        )
+        user_speaker_type = str((user_speaker or {}).get("speaker_type") or "").strip() or None
+        user_speaker_id = str((user_speaker or {}).get("speaker_id") or "").strip() or None
+        user_speaker_name = str((user_speaker or {}).get("speaker_name") or "").strip() or None
+        user_speaker_title = str((user_speaker or {}).get("speaker_title") or "").strip() or None
+        user_speaker_personality = str((user_speaker or {}).get("speaker_personality") or "").strip() or None
+        if persist_user_message:
+            chat_service.save_user_message(
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+                content=str(text),
+                speaker_type=user_speaker_type,
+                speaker_id=user_speaker_id,
+                speaker_name=user_speaker_name,
+                speaker_title=user_speaker_title,
+                speaker_personality=user_speaker_personality,
+                attachments=attachments_meta,
+            )
 
         # 初始化 RAG 相关变量：用于引用管理（给前端展示 & 最终落库）
         rag_references: list[dict[str, Any]] = []
@@ -616,9 +639,27 @@ class ChatStreamService:
 
             from backend.utils.snowflake import generate_snowflake_id
             current_message_id = str(generate_snowflake_id())
+            assistant_speaker_type = str((assistant_speaker or {}).get("speaker_type") or "").strip() or None
+            assistant_speaker_id = str((assistant_speaker or {}).get("speaker_id") or "").strip() or None
+            assistant_speaker_name = str((assistant_speaker or {}).get("speaker_name") or "").strip() or None
+            assistant_speaker_title = str((assistant_speaker or {}).get("speaker_title") or "").strip() or None
+            assistant_speaker_personality = str(
+                (assistant_speaker or {}).get("speaker_personality") or ""
+            ).strip() or None
             
             yield {"type": "session.status", "status": "thinking"}
-            yield {"type": "message.start", "message_id": current_message_id}
+            message_start_event: dict[str, Any] = {"type": "message.start", "message_id": current_message_id}
+            if assistant_speaker_type:
+                message_start_event["speaker_type"] = assistant_speaker_type
+            if assistant_speaker_id:
+                message_start_event["speaker_id"] = assistant_speaker_id
+            if assistant_speaker_name:
+                message_start_event["speaker_name"] = assistant_speaker_name
+            if assistant_speaker_title:
+                message_start_event["speaker_title"] = assistant_speaker_title
+            if assistant_speaker_personality:
+                message_start_event["speaker_personality"] = assistant_speaker_personality
+            yield message_start_event
 
             logger.debug(
                 f"agent astream begin | thread_id={thread_id} | message_id={current_message_id} | elapsed_ms={int((time.monotonic()-start_ts)*1000)}"
@@ -687,6 +728,11 @@ class ChatStreamService:
                                             thread_id=thread_id,
                                             assistant_id=assistant_id,
                                             content=segment_text,
+                                            speaker_type=assistant_speaker_type,
+                                            speaker_id=assistant_speaker_id,
+                                            speaker_name=assistant_speaker_name,
+                                            speaker_title=assistant_speaker_title,
+                                            speaker_personality=assistant_speaker_personality,
                                             created_at=pre_parse_time,
                                         )
                                     except Exception:
@@ -731,9 +777,10 @@ class ChatStreamService:
                     full_text = "".join(full_assistant_accum).strip()
                     suggested_questions: list[str] = []
 
-                    if full_text:
+                    if full_text and emit_suggested_questions:
                         try:
-                            question_prompt = suggested_questions_prompt(text, full_text)
+                            question_source_text = str(memory_user_text if memory_user_text is not None else text)
+                            question_prompt = suggested_questions_prompt(question_source_text, full_text)
 
                             question_msg = await model.ainvoke([HumanMessage(content=question_prompt)])
                             questions_text = getattr(question_msg, "content", "") or ""
@@ -753,15 +800,21 @@ class ChatStreamService:
                             thread_id=thread_id,
                             assistant_id=assistant_id,
                             content=assistant_text,
+                            speaker_type=assistant_speaker_type,
+                            speaker_id=assistant_speaker_id,
+                            speaker_name=assistant_speaker_name,
+                            speaker_title=assistant_speaker_title,
+                            speaker_personality=assistant_speaker_personality,
                             attachments=attachments_meta,
                             references=rag_references,
                             suggested_questions=suggested_questions,
                         )
-                    if full_text:
+                    if full_text and persist_chat_memory:
+                        memory_user = str(memory_user_text if memory_user_text is not None else text)
                         chat_service.save_chat_memory(
                             thread_id=thread_id,
                             assistant_id=assistant_id,
-                            user_text=str(text),
+                            user_text=memory_user,
                             assistant_text=full_text,
                         )
                 except Exception:

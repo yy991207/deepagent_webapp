@@ -108,6 +108,11 @@ export type ChatMessage =
       id: string;
       role: "user" | "assistant";
       content: string;
+      speakerType?: "user" | "agent" | "system";
+      speakerId?: string;
+      speakerName?: string;
+      speakerTitle?: string;
+      speakerPersonality?: string;
       attachments?: AttachmentMeta[];
       references?: RagReference[];
       suggestedQuestions?: string[];
@@ -205,9 +210,37 @@ type SocketPayloadBase = {
 
 export type SocketPayload = SocketPayloadBase &
   (
-    | { type: "chat.delta"; text: string }
+    | {
+        type: "chat.delta";
+        text: string;
+        speaker_type?: "user" | "agent" | "system";
+        speaker_id?: string;
+        speaker_name?: string;
+        speaker_title?: string;
+        speaker_personality?: string;
+      }
     | { type: "delta"; text: string }
-    | { type: "message.start"; message_id: string }
+    | {
+        type: "character";
+        character: {
+          speaker_type?: "user" | "agent" | "system";
+          speaker_id?: string;
+          speaker_name?: string;
+          speaker_title?: string;
+          speaker_personality?: string;
+        };
+        queue_index?: number;
+        queue_total?: number;
+      }
+    | {
+        type: "message.start";
+        message_id: string;
+        speaker_type?: "user" | "agent" | "system";
+        speaker_id?: string;
+        speaker_name?: string;
+        speaker_title?: string;
+        speaker_personality?: string;
+      }
     | { type: "tool.start"; id: string; name: string; args: unknown }
     | { type: "tool.end"; id: string; name: string; status: string; output: unknown; message_id?: string }
     | { type: "rag.references"; references: RagReference[] }

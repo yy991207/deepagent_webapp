@@ -13,6 +13,7 @@ from backend.api.routers.chat_router import router as chat_router
 from backend.api.routers.filesystem_router import router as filesystem_router
 from backend.api.routers.agent_router import router as agent_router
 from backend.api.routers.creative_router import router as creative_router
+from backend.api.routers.group_router import router as group_router
 
 
 app = FastAPI(title="DeepAgents CLI Web")
@@ -32,6 +33,7 @@ app.include_router(chat_router)
 app.include_router(filesystem_router)
 app.include_router(agent_router)
 app.include_router(creative_router)
+app.include_router(group_router)
 
 
 @app.on_event("shutdown")

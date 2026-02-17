@@ -244,6 +244,8 @@ type GeneratedSourceItem = FilesystemWrite & {
   source_ref: string;
 };
 
+type ChatMode = "chat" | "creative" | "group";
+
 const buildFilesystemWriteSourceRef = (sessionId: string, writeId: string): string =>
   `fsw:${sessionId}:${writeId}`;
 
@@ -358,6 +360,14 @@ const AGENTS = [
   { id: "video", name: "视频概览", Icon: Icons.Video, color: "#e8f5e9" },
   { id: "quiz", name: "测验", Icon: Icons.Quiz, color: "#e0f2f1" },
 ];
+
+const GROUP_AGENT_PRESETS = [
+  { id: "agent_1", name: "林医生", title: "医生", personality: "理性温和" },
+  { id: "agent_2", name: "周老师", title: "教师", personality: "耐心严谨" },
+  { id: "agent_3", name: "阿程", title: "程序员", personality: "直接务实" },
+  { id: "agent_4", name: "小顾", title: "产品经理", personality: "沟通导向" },
+  { id: "agent_5", name: "阿青", title: "设计师", personality: "审美敏锐" },
+] as const;
 
 function SpeakerProfileEditor({
   profile,
@@ -591,7 +601,8 @@ function App() {
   const [input, setInput] = useState("");
   const [searchValue, setSearchValue] = useState("");
   const [status, setStatus] = useState("就绪");
-  const [creativeModeEnabled, setCreativeModeEnabled] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>("chat");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [creativeRun, setCreativeRun] = useState<CreativeRun | null>(null);
   const [creativeFeedback, setCreativeFeedback] = useState("");
   const [creativeBusy, setCreativeBusy] = useState(false);
@@ -643,6 +654,10 @@ function App() {
   const [podcastSelectedSpeaker, setPodcastSelectedSpeaker] = useState<string>("");
   const [podcastEpisodeName, setPodcastEpisodeName] = useState<string>("");
   const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState<string>("");
+
+  const creativeModeEnabled = chatMode === "creative";
+  const groupModeEnabled = chatMode === "group";
+  const activeModeText = creativeModeEnabled ? "创作模式" : groupModeEnabled ? "群聊模式" : "普通对话";
 
   const isCreativeProcessingStatus = (status?: string | null) =>
     status === "pre_agent_generating" ||
@@ -736,6 +751,7 @@ function App() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const assistantBufferRef = useRef<{ id: string; text: string }>({ id: "", text: "" });
+  const assistantBufferSpeakerRef = useRef<string | null>(null);
   const pendingAssistantIdRef = useRef<string | null>(null);
   const pendingRefsRef = useRef<any[] | null>(null);
   const currentMessageIdRef = useRef<string | null>(null);
@@ -745,6 +761,12 @@ function App() {
   // 只能暂存到这里，等待下一个 chat.delta 触发的新消息认领
   const pendingWritesForNextRef = useRef<FilesystemWrite[]>([]);
   const creativeStreamMessageIdRef = useRef<string | null>(null);
+  const pendingGroupSpeakerRef = useRef<{
+    speakerId: string;
+    speakerName: string;
+    speakerTitle: string;
+    speakerPersonality: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentSessionIdRef = useRef<string>("");
   const isAutoScrollEnabledRef = useRef(true);
@@ -762,6 +784,8 @@ function App() {
   const [writeDetailOpen, setWriteDetailOpen] = useState(false);
   const [writeDetailFullscreen, setWriteDetailFullscreen] = useState(false);
   const [writeDetail, setWriteDetail] = useState<{write_id: string; content: string; binary_content?: string; title: string; file_type?: string; file_path?: string} | null>(null);
+  const [activeGroupSpeakerId, setActiveGroupSpeakerId] = useState<string | null>(null);
+  const modeSwitchRef = useRef<HTMLDivElement | null>(null);
 
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refModalIndex, setRefModalIndex] = useState<number | null>(null);
@@ -770,15 +794,21 @@ function App() {
   const [refModalFileLoading, setRefModalFileLoading] = useState(false);
 
   const selectedList = useMemo(() => Array.from(selectedFiles), [selectedFiles]);
+  const groupAgentMap = useMemo(
+    () => new Map(GROUP_AGENT_PRESETS.map((item) => [item.id, item] as const)),
+    [],
+  );
   const isStreaming = status === "思考中...";
   const canCancelCreativeTask = !!creativeRun && isCreativeCancellableStatus(creativeRun.status);
   const showUnifiedStopButton = isStreaming || canCancelCreativeTask;
 
   const resetStreamState = () => {
     assistantBufferRef.current = { id: "", text: "" };
+    assistantBufferSpeakerRef.current = null;
     pendingAssistantIdRef.current = null;
     pendingRefsRef.current = null;
     pendingWritesForNextRef.current = [];
+    pendingGroupSpeakerRef.current = null;
   };
 
   const cancelActiveStream = async (sid: string) => {
@@ -1005,6 +1035,42 @@ function App() {
     };
   }, [sourceActionMenuId]);
 
+  useEffect(() => {
+    if (!modeMenuOpen) return;
+
+    const onDocClick = (ev: MouseEvent) => {
+      const target = ev.target as Node | null;
+      if (!target) {
+        setModeMenuOpen(false);
+        return;
+      }
+      if (modeSwitchRef.current && modeSwitchRef.current.contains(target)) {
+        return;
+      }
+      setModeMenuOpen(false);
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setModeMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modeMenuOpen]);
+
+  useEffect(() => {
+    if (!groupModeEnabled) {
+      setActiveGroupSpeakerId(null);
+      pendingGroupSpeakerRef.current = null;
+    }
+  }, [groupModeEnabled]);
+
   const refreshMemoryStats = async (sid: string) => {
     const threadId = String(sid || "").trim();
     if (!threadId) return;
@@ -1147,6 +1213,7 @@ function App() {
     currentSessionIdRef.current = next;
     setSessionId(next);
     setSelectedFiles(new Set());
+    setActiveGroupSpeakerId(null);
     setStatus("就绪");
     try {
       localStorage.setItem("deepagents_session_id", next);
@@ -1621,6 +1688,11 @@ function App() {
           id: m.id,
           role: m.role as "user" | "assistant",
           content: m.content || "",
+          speakerType: (m as any).speaker_type as "user" | "agent" | "system" | undefined,
+          speakerId: (m as any).speaker_id as string | undefined,
+          speakerName: (m as any).speaker_name as string | undefined,
+          speakerTitle: (m as any).speaker_title as string | undefined,
+          speakerPersonality: (m as any).speaker_personality as string | undefined,
           attachments: m.attachments || [],
           references: m.references || [],
           suggestedQuestions: m.suggested_questions || [],
@@ -1943,6 +2015,25 @@ function App() {
     });
   };
 
+  const resolveGroupSpeakerMeta = (raw: {
+    speaker_id?: string;
+    speaker_name?: string;
+    speaker_title?: string;
+    speaker_personality?: string;
+  } | null) => {
+    const speakerId = String(raw?.speaker_id || "").trim();
+    if (!speakerId) {
+      return null;
+    }
+    return {
+      speakerId,
+      speakerName: String(raw?.speaker_name || "").trim() || groupAgentMap.get(speakerId)?.name || speakerId,
+      speakerTitle: String(raw?.speaker_title || "").trim() || groupAgentMap.get(speakerId)?.title || "角色",
+      speakerPersonality:
+        String(raw?.speaker_personality || "").trim() || groupAgentMap.get(speakerId)?.personality || "风格",
+    };
+  };
+
 
   const handleSocketPayload = (payload: SocketPayload) => {
     // 过滤非当前会话的 SSE 事件，避免旧会话的数据渲染到新会话
@@ -1974,12 +2065,49 @@ function App() {
       }
       return;
     }
+    if (payload.type === "character") {
+      if (!groupModeEnabled) {
+        return;
+      }
+      const speakerMeta = resolveGroupSpeakerMeta(payload.character as any);
+      if (speakerMeta) {
+        // 关键逻辑：每次收到新角色事件，都强制开启一个新的消息段。
+        // 这样前端渲染会严格按 speaker_id 切分，不依赖后续 message.start 是否稳定到达。
+        assistantBufferRef.current = { id: "", text: "" };
+        assistantBufferSpeakerRef.current = null;
+        pendingAssistantIdRef.current = `group-${speakerMeta.speakerId}-${createId()}`;
+        pendingGroupSpeakerRef.current = speakerMeta;
+        setActiveGroupSpeakerId(speakerMeta.speakerId);
+      }
+      return;
+    }
     if (payload.type === "chat.delta" || payload.type === "delta") {
       const timestamp = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      const deltaSpeakerMeta = groupModeEnabled ? resolveGroupSpeakerMeta(payload as any) : null;
+      const incomingSpeakerId = groupModeEnabled
+        ? deltaSpeakerMeta?.speakerId || pendingGroupSpeakerRef.current?.speakerId || null
+        : null;
+      if (
+        groupModeEnabled &&
+        assistantBufferRef.current.id &&
+        incomingSpeakerId &&
+        assistantBufferSpeakerRef.current &&
+        assistantBufferSpeakerRef.current !== incomingSpeakerId
+      ) {
+        // 关键逻辑：即使 message.start 丢失或乱序，也按 speaker_id 切分消息边界。
+        assistantBufferRef.current = { id: "", text: "" };
+        assistantBufferSpeakerRef.current = null;
+      }
       if (!assistantBufferRef.current.id) {
         const id = pendingAssistantIdRef.current || createId();
         console.log("chat.delta 创建新消息，使用 ID:", id, "来源:", pendingAssistantIdRef.current ? "后端 message_id" : "前端 createId()");
         assistantBufferRef.current = { id, text: "" };
+        const speakerMeta = groupModeEnabled ? (deltaSpeakerMeta || pendingGroupSpeakerRef.current) : null;
+        if (speakerMeta?.speakerId) {
+          setActiveGroupSpeakerId(speakerMeta.speakerId);
+        }
+        assistantBufferSpeakerRef.current = speakerMeta?.speakerId || null;
+        pendingGroupSpeakerRef.current = null;
 
         // 关键修复：在 setMessages 回调外部读取并清空 pending writes ref
         // 避免 React state updater 双重调用时第二次看到已被清空的 ref
@@ -2002,13 +2130,44 @@ function App() {
             // 消息已存在，合并 writes
             return prev.map((m) =>
               m.id === id && m.role === "assistant"
-                ? { ...m, timestamp, isPending: false, references: pendingRefsRef.current || m.references, ...(claimedWrites.length > 0 ? { writes: [...(Array.isArray((m as any).writes) ? (m as any).writes : []), ...claimedWrites] } : {}) }
+                ? {
+                    ...m,
+                    timestamp,
+                    isPending: false,
+                    references: pendingRefsRef.current || m.references,
+                    ...(speakerMeta
+                      ? {
+                          speakerType: "agent",
+                          speakerId: speakerMeta.speakerId,
+                          speakerName: speakerMeta.speakerName,
+                          speakerTitle: speakerMeta.speakerTitle,
+                          speakerPersonality: speakerMeta.speakerPersonality,
+                        }
+                      : {}),
+                    ...(claimedWrites.length > 0 ? { writes: [...(Array.isArray((m as any).writes) ? (m as any).writes : []), ...claimedWrites] } : {}),
+                  }
                 : m
             );
           }
           console.log("创建新 assistant 消息:", id, claimedWrites.length > 0 ? `带 ${claimedWrites.length} 个文档` : "");
           
-          return [...prev, { id, role: "assistant", content: "", timestamp, isPending: false, references: pendingRefsRef.current || [], ...(claimedWrites.length > 0 ? { writes: claimedWrites } : {}) }];
+          return [
+            ...prev,
+            {
+              id,
+              role: "assistant",
+              content: "",
+              timestamp,
+              isPending: false,
+              references: pendingRefsRef.current || [],
+              speakerType: speakerMeta ? "agent" : undefined,
+              speakerId: speakerMeta?.speakerId,
+              speakerName: speakerMeta?.speakerName,
+              speakerTitle: speakerMeta?.speakerTitle,
+              speakerPersonality: speakerMeta?.speakerPersonality,
+              ...(claimedWrites.length > 0 ? { writes: claimedWrites } : {}),
+            },
+          ];
         });
       }
       assistantBufferRef.current.text += payload.text;
@@ -2022,8 +2181,32 @@ function App() {
       return;
     }
     if (payload.type === "message.start") {
-      currentMessageIdRef.current = payload.message_id || null;
-      pendingAssistantIdRef.current = payload.message_id || null;
+      const nextMessageId = payload.message_id || null;
+      const nextSpeakerId = groupModeEnabled ? String((payload as any).speaker_id || "").trim() || null : null;
+      if (
+        assistantBufferRef.current.id &&
+        (
+          (nextMessageId && assistantBufferRef.current.id !== nextMessageId) ||
+          (nextSpeakerId && assistantBufferSpeakerRef.current && assistantBufferSpeakerRef.current !== nextSpeakerId)
+        )
+      ) {
+        // 关键逻辑：群聊多角色时每个 speaker 都会发独立 message.start。
+        // 这里遇到新 message_id 就重置缓冲，避免后续 delta 继续拼到上一位角色的消息里。
+        assistantBufferRef.current = { id: "", text: "" };
+        assistantBufferSpeakerRef.current = null;
+      }
+      currentMessageIdRef.current = nextMessageId;
+      pendingAssistantIdRef.current = nextMessageId;
+      if (groupModeEnabled) {
+        const speakerMeta = resolveGroupSpeakerMeta(payload as any);
+        if (speakerMeta) {
+          pendingGroupSpeakerRef.current = speakerMeta;
+          setActiveGroupSpeakerId(speakerMeta.speakerId);
+          if (assistantBufferRef.current.id && !assistantBufferSpeakerRef.current) {
+            assistantBufferSpeakerRef.current = speakerMeta.speakerId;
+          }
+        }
+      }
       console.log("message.start 收到 message_id:", currentMessageIdRef.current);
       return;
     }
@@ -2033,6 +2216,7 @@ function App() {
       // 重置 assistant buffer，确保工具调用前的文本被“封存”在当前消息中
       // 接下来的文本将作为新消息创建，从而实现 text -> tool -> text 的穿插效果
       assistantBufferRef.current = { id: "", text: "" };
+      assistantBufferSpeakerRef.current = null;
       pendingAssistantIdRef.current = null;
       
       const startedAt = new Date().toISOString();
@@ -2156,6 +2340,7 @@ function App() {
       if (payload.status === "done") {
         setStatus("就绪");
         assistantBufferRef.current = { id: "", text: "" };
+        assistantBufferSpeakerRef.current = null;
         pendingAssistantIdRef.current = null;
         pendingRefsRef.current = null;
         pendingWritesForNextRef.current = [];
@@ -2520,6 +2705,16 @@ function App() {
     }
   };
 
+  const toggleModeMenu = () => {
+    setModeMenuOpen((prev) => !prev);
+  };
+
+  const selectMode = (nextMode: Exclude<ChatMode, "chat">) => {
+    // 关键交互：点击当前已激活模式时回到普通对话，避免必须额外提供“关闭模式”按钮。
+    setChatMode((prev) => (prev === nextMode ? "chat" : nextMode));
+    setModeMenuOpen(false);
+  };
+
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed) {
@@ -2530,6 +2725,7 @@ function App() {
       await startCreativeRun(trimmed);
       return;
     }
+    pendingGroupSpeakerRef.current = null;
     await cancelActiveStream(sessionId);
     // 确保 currentSessionIdRef 和当前 sessionId 同步，避免 SSE 事件被过滤
     currentSessionIdRef.current = sessionId;
@@ -2543,7 +2739,15 @@ function App() {
 
     setMessages((prev: ChatMessage[]) => [
       ...prev,
-      { id: createId(), role: "user", content: trimmed, attachments, timestamp: userTimestamp },
+      {
+        id: createId(),
+        role: "user",
+        content: trimmed,
+        speakerType: groupModeEnabled ? "user" : undefined,
+        speakerName: groupModeEnabled ? "你" : undefined,
+        attachments,
+        timestamp: userTimestamp,
+      },
     ]);
     // 用户发送消息时强制滚动到底部
     setTimeout(() => scrollToBottom(true), 0);
@@ -2555,7 +2759,8 @@ function App() {
     abortControllerRef.current = abortController;
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const streamApi = groupModeEnabled ? "/api/group/stream" : "/api/chat/stream";
+      const response = await fetch(streamApi, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3006,6 +3211,27 @@ function App() {
           </header>
 
           <div className="chat-messages" onScroll={handleChatScroll}>
+            {groupModeEnabled ? (
+              <div className="group-mode-banner">
+                <div className="group-mode-banner-header">
+                  <span className="group-mode-title">群聊成员</span>
+                  <span className="group-mode-subtitle">自由发言（队列顺序消费）</span>
+                </div>
+                <div className="group-mode-members">
+                  {GROUP_AGENT_PRESETS.map((agent) => (
+                    <div
+                      key={agent.id}
+                      className={`group-mode-member ${activeGroupSpeakerId === agent.id ? "active" : ""}`}
+                    >
+                      <span className="group-mode-member-name">{agent.name}</span>
+                      <span className="group-mode-member-meta">
+                        {agent.title} · {agent.personality}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {messages.length === 0 && (
                <div className="empty-state">
                   <div className="empty-icon"><Icons.Sparkles /></div>
@@ -3056,6 +3282,18 @@ function App() {
                     </div>
                     <div className="message-container assistant">
                       <div className={`message-bubble ${message.role}`}>
+                        {groupModeEnabled && message.speakerType === "agent" ? (
+                          <div className="group-speaker-header">
+                            <span className="group-speaker-name">
+                              {message.speakerName || groupAgentMap.get(message.speakerId || "")?.name || "群聊助手"}
+                            </span>
+                            <span className="group-speaker-tags">
+                              {message.speakerTitle || groupAgentMap.get(message.speakerId || "")?.title || "角色"}
+                              {" · "}
+                              {message.speakerPersonality || groupAgentMap.get(message.speakerId || "")?.personality || "风格"}
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="message-content">
                           <AssistantContent
                             text={message.content}
@@ -3420,7 +3658,13 @@ function App() {
             <div className="input-wrapper">
               <textarea
                 rows={1}
-                placeholder={creativeModeEnabled ? "输入创作需求，进入多智能体创作模式" : "用 DeepAgents 创造无限可能"}
+                placeholder={
+                  creativeModeEnabled
+                    ? "输入创作需求，进入多智能体创作模式"
+                    : groupModeEnabled
+                      ? "输入群聊话题，进入多智能体群聊模式"
+                      : "用 DeepAgents 创造无限可能"
+                }
                 value={input}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;
@@ -3432,29 +3676,46 @@ function App() {
               />
               <div className="input-footer">
                 <div className="input-actions-left">
-                  <button
-                    type="button"
-                    className="input-action-btn"
-                    title="创作模式"
-                    style={{
-                      width: "auto",
-                      minWidth: 88,
-                      height: 32,
-                      paddingInline: 12,
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      lineHeight: "32px",
-                      border: creativeModeEnabled ? "1px solid #0d6efd" : "1px solid transparent",
-                      background: creativeModeEnabled ? "rgba(13, 110, 253, 0.1)" : "transparent",
-                      color: creativeModeEnabled ? "#0d6efd" : undefined,
-                    }}
-                    onClick={() => {
-                      setCreativeModeEnabled((prev) => !prev);
-                    }}
+                  <div
+                    className="mode-switch-wrap"
+                    ref={modeSwitchRef}
                   >
-                    创作模式
-                  </button>
+                    <button
+                      type="button"
+                      className={`input-action-btn mode-switch-btn ${chatMode !== "chat" ? "active" : ""}`}
+                      title={`模式切换（当前：${activeModeText}）`}
+                      onClick={toggleModeMenu}
+                    >
+                      <span className="mode-switch-btn-text">模式切换</span>
+                      <span className="mode-switch-btn-caret">
+                        <Icons.ChevronDown />
+                      </span>
+                    </button>
+                    {modeMenuOpen ? (
+                      <div className="mode-switch-popover">
+                        <button
+                          type="button"
+                          className={`mode-switch-option ${creativeModeEnabled ? "active" : ""}`}
+                          onClick={() => selectMode("creative")}
+                        >
+                          <span className="mode-switch-option-main">创作模式</span>
+                          <span className="mode-switch-option-desc">
+                            {creativeModeEnabled ? "再次点击退出" : "A/B/C + 人审流程"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`mode-switch-option ${groupModeEnabled ? "active" : ""}`}
+                          onClick={() => selectMode("group")}
+                        >
+                          <span className="mode-switch-option-main">群聊模式</span>
+                          <span className="mode-switch-option-desc">
+                            {groupModeEnabled ? "再次点击退出" : "多 Agent 群组对话"}
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <button type="button" className="input-action-btn" title="添加">
                     <Icons.Plus />
                   </button>
@@ -3497,6 +3758,11 @@ function App() {
             {creativeModeEnabled && !creativeRun ? (
               <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
                 创作模式已开启。发送需求后将进入多智能体创作流程。
+              </div>
+            ) : null}
+            {groupModeEnabled ? (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+                群聊模式已开启。角色会按话题自由接话，系统按队列顺序展示发言。
               </div>
             ) : null}
             <div className="disclaimer">AI生成的内容可能不准确，请仔细核对重要信息</div>
