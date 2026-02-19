@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from backend.config.deepagents_settings import create_router_model
+from backend.config.deepagents_settings import create_router_model, build_langchain_run_config
 
 
 _DEFAULT_ROUTER_PROMPT = """你是一个“分流LLM”，负责根据用户需求选择合适的主模型等级。
@@ -109,7 +109,18 @@ class ModelRouterService:
             f"是否触发RAG：{str(has_rag)}\n"
             f"附件数量：{files_count}\n"
         )
-        msg = await router_llm.ainvoke([HumanMessage(content=input_text)])
+        msg = await router_llm.ainvoke(
+            [HumanMessage(content=input_text)],
+            config=build_langchain_run_config(
+                run_name="model_router_decision",
+                tags=["deepagents-webapp", "model-router"],
+                metadata={
+                    "has_attachments": has_attachments,
+                    "has_rag": has_rag,
+                    "files_count": files_count,
+                },
+            ),
+        )
         raw_text = str(getattr(msg, "content", "") or "").strip()
 
         data = self._parse_json(raw_text) or {}

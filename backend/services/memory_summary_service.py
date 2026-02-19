@@ -5,7 +5,7 @@ import uuid
 
 from langchain_core.messages import HumanMessage
 
-from backend.config.deepagents_settings import create_model
+from backend.config.deepagents_settings import create_model, build_langchain_run_config
 
 from backend.database.mongo_manager import get_mongo_manager
 from backend.prompts.memory_summary_prompts import memory_summary_prompt
@@ -96,7 +96,15 @@ class MemorySummaryService:
             prompt = memory_summary_prompt(memory_text)
 
             model = create_model()
-            msg = await model.ainvoke([HumanMessage(content=prompt)])
+            msg = await model.ainvoke(
+                [HumanMessage(content=prompt)],
+                config=build_langchain_run_config(
+                    thread_id=self._thread_id,
+                    run_name="chat_memory_summary",
+                    tags=["deepagents-webapp", "memory-summary"],
+                    metadata={"assistant_id": self._assistant_id},
+                ),
+            )
             summary_text = str(getattr(msg, "content", "") or "").strip()
             if self._summary_max_chars > 0 and len(summary_text) > self._summary_max_chars:
                 summary_text = summary_text[: self._summary_max_chars].strip()

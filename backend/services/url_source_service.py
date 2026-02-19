@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from markdownify import markdownify
 
-from backend.config.deepagents_settings import create_model
+from backend.config.deepagents_settings import create_model, build_langchain_run_config
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,14 @@ class UrlSourceService:
                 "- 保留关键事实、数据、时间、人物\n"
                 "- 输出只要 Markdown，不要额外解释"
             )
-            msg = await llm.ainvoke([HumanMessage(content=prompt)])
+            msg = await llm.ainvoke(
+                [HumanMessage(content=prompt)],
+                config=build_langchain_run_config(
+                    run_name="url_source_summary",
+                    tags=["deepagents-webapp", "url-source"],
+                    metadata={"mode": mode, "url": final_url},
+                ),
+            )
             content = getattr(msg, "content", "") or ""
 
         filename_base = self.safe_filename(title) if title else "url"

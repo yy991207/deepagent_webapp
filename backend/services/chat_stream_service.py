@@ -28,7 +28,7 @@ from deepagents.middleware.subagents import SubAgent
 from langchain_core.messages import HumanMessage
 
 from backend.services.agent_stream_event_service import AgentStreamEventService
-from backend.config.deepagents_settings import create_model, settings
+from backend.config.deepagents_settings import create_model, settings, build_langchain_run_config
 from backend.services.checkpointer_provider import get_checkpointer
 from backend.services.rag_service import RagService
 from backend.services.skills_sync_service import SkillsSyncService
@@ -693,7 +693,15 @@ class ChatStreamService:
                             stream_input,
                             stream_mode=["messages"],
                             subgraphs=True,
-                            config={"configurable": {"thread_id": thread_id}},
+                            config=build_langchain_run_config(
+                                thread_id=thread_id,
+                                run_name="chat_stream_agent",
+                                tags=["deepagents-webapp", "chat-stream"],
+                                metadata={
+                                    "assistant_id": assistant_id,
+                                    "has_attachments": bool(file_refs),
+                                },
+                            ),
                         ):
                             # 检测会话是否已被取消，如果是则中断流式生成
                             if cancel_service.is_cancelled(thread_id, cancel_version):

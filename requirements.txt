@@ -2,6 +2,7 @@
 deepagents>=0.3.6
 langchain>=1.2.3
 langchain-openai>=1.1.7
+langsmith>=0.7.1
 langgraph-checkpoint-sqlite>=3.0.0
 opensandbox>=0.1.3
 

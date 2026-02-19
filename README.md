@@ -186,6 +186,16 @@ OPENAI_TEMPERATURE=0.7
  
  ### 可选（用到对应能力再配）
  - `TAVILY_API_KEY`：开启联网搜索工具
+
+### LangSmith 追踪（可选）
+- `LANGCHAIN_TRACING_V2`：是否开启追踪（`true/false`）
+- `LANGCHAIN_API_KEY`：LangSmith API Key
+- `LANGCHAIN_PROJECT`：LangSmith 项目名（不配则落到 default）
+- `LANGCHAIN_ENDPOINT`：LangSmith API 端点（默认 `https://api.smith.langchain.com`）
+
+说明：
+- 项目已兼容新命名变量（`LANGSMITH_*`）。如果你只配了 `LANGCHAIN_*`，后端会在启动时自动补齐到 `LANGSMITH_*`。
+- 聊天主链路会自动附带 `run_name/tags/metadata`，方便在 LangSmith 里按场景筛选。
  
 ### RAG 相关（可选）
 - `RAG_EMBEDDING_PROVIDER`：embedding 提供商（`dashscope`/`openai`/`hf`）

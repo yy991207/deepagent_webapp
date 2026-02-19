@@ -7,13 +7,79 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
+
+logger = logging.getLogger(__name__)
+
+
+def _is_truthy(raw: str | None) -> bool:
+    return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def bootstrap_langsmith_env() -> dict[str, str]:
+    """兼容旧变量命名：把 LANGCHAIN_* 自动补齐到 LANGSMITH_*。
+
+    说明：
+    - 历史上很多项目使用 LANGCHAIN_API_KEY/LANGCHAIN_PROJECT 等变量。
+    - 新版文档主推 LANGSMITH_* 命名。
+    - 这里在进程启动阶段做一次映射，减少迁移成本。
+    """
+
+    changed: dict[str, str] = {}
+    aliases = (
+        ("LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"),
+        ("LANGCHAIN_PROJECT", "LANGSMITH_PROJECT"),
+        ("LANGCHAIN_ENDPOINT", "LANGSMITH_ENDPOINT"),
+    )
+    for legacy_key, new_key in aliases:
+        legacy_value = str(os.environ.get(legacy_key) or "").strip()
+        new_value = str(os.environ.get(new_key) or "").strip()
+        if legacy_value and not new_value:
+            os.environ[new_key] = legacy_value
+            changed[new_key] = legacy_key
+
+    if _is_truthy(os.environ.get("LANGCHAIN_TRACING_V2")) and not str(os.environ.get("LANGSMITH_TRACING") or "").strip():
+        os.environ["LANGSMITH_TRACING"] = "true"
+        changed["LANGSMITH_TRACING"] = "LANGCHAIN_TRACING_V2"
+
+    if changed:
+        logger.info(
+            "LangSmith env bootstrap applied | mappings=%s",
+            {new: old for new, old in changed.items()},
+        )
+    return changed
+
+
+def build_langchain_run_config(
+    *,
+    thread_id: str | None = None,
+    run_name: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """构建 LangChain/LangGraph 运行配置，统一注入 run 元数据。"""
+
+    config: dict[str, Any] = {}
+    if thread_id:
+        config["configurable"] = {"thread_id": thread_id}
+    if run_name:
+        config["run_name"] = str(run_name)
+    if tags:
+        config["tags"] = [str(tag) for tag in tags]
+    if metadata:
+        config["metadata"] = dict(metadata)
+    return config
+
+
+# 模块加载时先做一次变量兼容映射，确保后续模型实例统一生效。
+bootstrap_langsmith_env()
 
 
 def _find_project_root(start_path: Optional[Path] = None) -> Optional[Path]:
